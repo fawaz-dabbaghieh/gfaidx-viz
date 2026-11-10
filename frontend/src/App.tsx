@@ -7,7 +7,6 @@ import { StatsPanel } from './components/StatsPanel'
 import { GraphExtractionControls } from './components/GraphExtractionControls'
 import { BedAnnotationPanel } from './components/BedAnnotationPanel'
 import { NodeStyleCsvPanel } from './components/NodeStyleCsvPanel'
-import { urlExamples } from './data/urlExamples'
 import { BandageLayoutWorker } from './utils/BandageLayoutWorker'
 import { parseGFA } from './utils/gfaParser'
 import { convertGFAToGraph } from './utils/gfaConverter'
@@ -18,7 +17,11 @@ import {
 import { parseNodeStyleCsv, applyNodeStyleCsv } from './utils/nodeStyleCsv'
 import { parseGeneTrackBed, type GeneRecord } from './utils/geneTrackBed'
 import { clampZoom } from './utils/zoom'
-import { readBackendError, runGfaidxJob } from './api/gfaidx'
+import {
+  GfaidxResultTooLargeError,
+  readBackendError,
+  runGfaidxJob,
+} from './api/gfaidx'
 import type { GfaidxJobProgress } from './api/gfaidx'
 import type {
   LayoutOptions,
@@ -132,13 +135,22 @@ function App({ worker, onStopLayout }: AppProps) {
   // or more (see runReferencePathRelax).
   const [layoutElapsedMs, setLayoutElapsedMs] = useState(0)
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
-  const [examplesMenuOpen, setExamplesMenuOpen] = useState(false)
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
   const [statsDialogOpen, setStatsDialogOpen] = useState(false)
   const [urlDialogOpen, setUrlDialogOpen] = useState(false)
   const [urlInput, setUrlInput] = useState('')
   const [loadingFile, setLoadingFile] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  // An extraction whose result is too large to display; its download link is
+  // shown only while loadError is still that extraction's message.
+  const [oversizedResult, setOversizedResult] = useState<{
+    message: string
+    downloadUrl: string
+  } | null>(null)
+  const oversizedResultUrl =
+    oversizedResult && oversizedResult.message === loadError
+      ? oversizedResult.downloadUrl
+      : null
   const [currentGraph, setCurrentGraph] = useState<Graph | null>(null)
   // The raw GFA text currentGraph was parsed from, kept only so "Download
   // GFA" can hand back exactly what was loaded rather than re-serializing
@@ -656,7 +668,6 @@ function App({ worker, onStopLayout }: AppProps) {
         }))
         setDrawPaths(false)
         setFileMenuOpen(false)
-        setExamplesMenuOpen(false)
         // Both are keyed by node identity (CSV) or reference sequence name
         // (gene track) from the *previous* graph - carrying them over could
         // silently mis-apply to a same-shaped but different new graph rather
@@ -858,6 +869,9 @@ function App({ worker, onStopLayout }: AppProps) {
 
       const message =
         error instanceof Error ? error.message : 'Failed to extract subgraph'
+      if (error instanceof GfaidxResultTooLargeError) {
+        setOversizedResult({ message, downloadUrl: error.downloadUrl })
+      }
       setLoadError(message)
     }
   }, [
@@ -952,6 +966,9 @@ function App({ worker, onStopLayout }: AppProps) {
 
       const message =
         error instanceof Error ? error.message : 'Failed to extract region'
+      if (error instanceof GfaidxResultTooLargeError) {
+        setOversizedResult({ message, downloadUrl: error.downloadUrl })
+      }
       setLoadError(message)
     }
   }, [
@@ -969,35 +986,6 @@ function App({ worker, onStopLayout }: AppProps) {
     selectedIndexedGraph,
     selectedRegionPathIndex,
   ])
-
-  // Handle loading from predefined URL example
-  const handleLoadURLExample = useCallback(
-    async (url: string, name: string) => {
-      try {
-        setLoadingFile(true)
-        setLoadError(null)
-        setFileMenuOpen(false)
-
-        const response = await fetch(url)
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
-        }
-
-        const text = await response.text()
-        loadGFAFromText(text, name)
-      } catch (error) {
-        console.error('Failed to load example from URL:', error)
-        setLoadError(
-          error instanceof Error
-            ? error.message
-            : 'Failed to load example from URL',
-        )
-      } finally {
-        setLoadingFile(false)
-      }
-    },
-    [loadGFAFromText],
-  )
 
   // Handle loading from local file
   const handleLoadFromFile = useCallback(
@@ -1291,7 +1279,7 @@ function App({ worker, onStopLayout }: AppProps) {
 
   // Close dropdown when clicking outside
   useEffect(() => {
-    if (!fileMenuOpen && !viewMenuOpen && !examplesMenuOpen) return
+    if (!fileMenuOpen && !viewMenuOpen) return
 
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -1300,13 +1288,12 @@ function App({ worker, onStopLayout }: AppProps) {
       ) {
         setFileMenuOpen(false)
         setViewMenuOpen(false)
-        setExamplesMenuOpen(false)
       }
     }
 
     document.addEventListener('click', handleClickOutside)
     return () => document.removeEventListener('click', handleClickOutside)
-  }, [fileMenuOpen, viewMenuOpen, examplesMenuOpen])
+  }, [fileMenuOpen, viewMenuOpen])
 
   // Close dialog with Escape key
   useEffect(() => {
@@ -1413,44 +1400,6 @@ function App({ worker, onStopLayout }: AppProps) {
                       Load GFA from your computer
                     </div>
                   </button>
-                  <div style={{ position: 'relative' }}>
-                    <button
-                      className="dropdown-item"
-                      onClick={e => {
-                        e.stopPropagation()
-                        setExamplesMenuOpen(!examplesMenuOpen)
-                      }}
-                    >
-                      <div className="dropdown-item-title">Examples →</div>
-                      <div className="dropdown-item-desc">
-                        Load example GFA files
-                      </div>
-                    </button>
-                    {examplesMenuOpen && (
-                      <div
-                        className="dropdown-menu"
-                        style={{ position: 'absolute', left: '100%', top: 0 }}
-                      >
-                        {urlExamples.map(example => (
-                          <button
-                            key={example.url}
-                            className="dropdown-item"
-                            onClick={() => {
-                              handleLoadURLExample(example.url, example.name)
-                            }}
-                            disabled={loadingFile}
-                          >
-                            <div className="dropdown-item-title">
-                              {example.name}
-                            </div>
-                            <div className="dropdown-item-desc">
-                              {example.description}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
                 </div>
               )}
             </div>
@@ -1531,6 +1480,13 @@ function App({ worker, onStopLayout }: AppProps) {
       {loadError && !urlDialogOpen && (
         <div className="load-error-banner" role="alert">
           <pre>{loadError}</pre>
+          {oversizedResultUrl && (
+            // A new tab keeps the viewer open if the backend shows the file
+            // inline instead of saving it (backends before the attachment fix).
+            <a href={oversizedResultUrl} target="_blank" rel="noopener noreferrer">
+              Download GFA
+            </a>
+          )}
           <button type="button" onClick={() => setLoadError(null)}>
             Dismiss
           </button>
@@ -1575,6 +1531,7 @@ function App({ worker, onStopLayout }: AppProps) {
             isExtracting={isExtractingSubgraph}
             jobProgress={gfaidxJobProgress}
             extractionError={loadError}
+            extractionDownloadUrl={oversizedResultUrl}
           />
           <LayoutControls
             options={layoutOptions}
@@ -2009,8 +1966,9 @@ function App({ worker, onStopLayout }: AppProps) {
                 <h3>Length Distribution</h3>
                 <LengthDistribution
                   graph={currentGraph}
+                  isDarkMode={isDarkMode}
                   width={700}
-                  height={200}
+                  height={220}
                 />
               </div>
             </div>

@@ -129,10 +129,8 @@ export interface GraphStats {
   avgLength: number
   medianLength: number
   lengthRatio: string
-  avgDepth: number
-  minDepth: number
-  maxDepth: number
-  uniqueNodes: GraphNode[]
+  // Ascending; shared with the length histogram so it isn't re-sorted.
+  sortedLengths: number[]
 }
 
 export interface Transform {

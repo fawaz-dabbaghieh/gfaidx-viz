@@ -44,6 +44,8 @@ interface GraphExtractionControlsProps {
   // users who scrolled down past the header were missing extraction
   // failures entirely otherwise.
   extractionError: string | null
+  // Set when the extraction finished but is too large to display.
+  extractionDownloadUrl: string | null
 }
 
 function formatElapsedSeconds(ms: number): string {
@@ -108,6 +110,7 @@ export function GraphExtractionControls({
   isExtracting,
   jobProgress,
   extractionError,
+  extractionDownloadUrl,
 }: GraphExtractionControlsProps) {
   const [graphPanelExpanded, setGraphPanelExpanded] = useState(true)
   // The backend queue/gfaidx/download phases can each individually sit still
@@ -129,7 +132,7 @@ export function GraphExtractionControls({
     return () => window.clearInterval(intervalId)
   }, [isExtracting])
   const [extractionMode, setExtractionMode] =
-    useState<ExtractionMode>('neighborhood')
+    useState<ExtractionMode>('region')
   const [coordinateTrackQuery, setCoordinateTrackQuery] = useState('')
   const selectedRegionPath = regionPaths[selectedRegionPathIndex]
   const controlsDisabled =
@@ -671,6 +674,17 @@ export function GraphExtractionControls({
               {extractionError && (
                 <div className="gfaidx-job-error" role="alert">
                   {extractionError}
+                  {extractionDownloadUrl && (
+                    <div>
+                      <a
+                        href={extractionDownloadUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Download GFA
+                      </a>
+                    </div>
+                  )}
                 </div>
               )}
             </form>

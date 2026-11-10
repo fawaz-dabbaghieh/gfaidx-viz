@@ -36,6 +36,18 @@ export interface GfaidxJobResult {
   ticket: string
 }
 
+// GfaidxResultTooLargeError means the job finished but the result is over the
+// backend's display limit (HTTP 413); it can still be saved from downloadUrl.
+export class GfaidxResultTooLargeError extends Error {
+  downloadUrl: string
+
+  constructor(message: string, downloadUrl: string) {
+    super(message)
+    this.name = 'GfaidxResultTooLargeError'
+    this.downloadUrl = downloadUrl
+  }
+}
+
 const ticketStatuses = new Set<GfaidxTicketStatus>([
   'PENDING',
   'RUNNING',
@@ -162,6 +174,15 @@ export async function runGfaidxJob({
 
   onProgress?.({ phase: 'DOWNLOADING', ticket: ticket.id })
   const resultResponse = await fetch(resultUrl, { signal })
+  if (resultResponse.status === 413) {
+    // The backend explains the sizes before ';' and how to fetch the file
+    // after it; the UI offers that download itself, so only the sizes are kept.
+    const reason = (await readBackendError(resultResponse)).split(';')[0]
+    throw new GfaidxResultTooLargeError(
+      `${reason}, so it cannot be displayed here. Use the download link to save it.`,
+      `${resultUrl}?download=true`,
+    )
+  }
   if (!resultResponse.ok) {
     throw new Error(await readBackendError(resultResponse))
   }

@@ -229,7 +229,8 @@ body:has(.app.dark-mode) {
   font-size: 13px;
 }
 
-.load-error-banner button {
+.load-error-banner button,
+.load-error-banner a {
   padding: 4px 8px;
   border: 1px solid #d78c8c;
   background: white;
@@ -238,13 +239,21 @@ body:has(.app.dark-mode) {
   font-size: 12px;
 }
 
+/* Keeps the download link next to Dismiss on the right. */
+.load-error-banner a {
+  margin-left: auto;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
 .app.dark-mode .load-error-banner {
   background: #341f1f;
   border-color: #704040;
   color: #ffb8b8;
 }
 
-.app.dark-mode .load-error-banner button {
+.app.dark-mode .load-error-banner button,
+.app.dark-mode .load-error-banner a {
   background: #2a2a2a;
   border-color: #704040;
   color: #ffb8b8;
@@ -574,6 +583,11 @@ body:has(.app.dark-mode) {
   color: #c33;
   font-size: 13px;
   white-space: pre-wrap;
+}
+
+.gfaidx-job-error a {
+  color: inherit;
+  font-weight: 600;
 }
 
 .app.dark-mode .gfaidx-job-error {
@@ -1141,49 +1155,6 @@ input[type='checkbox'] {
   font-weight: bold;
 }
 
-.contigs-scroll {
-  max-height: 200px;
-  overflow-y: auto;
-  background: #f9f9f9;
-  padding: 8px;
-  margin-top: 10px;
-}
-
-.app.dark-mode .contigs-scroll {
-  background: #1a1a1a;
-}
-
-.contig-item {
-  display: flex;
-  justify-content: space-between;
-  padding: 5px 0;
-  font-size: 13px;
-  border-bottom: 1px solid #eee;
-}
-
-.app.dark-mode .contig-item {
-  border-bottom-color: #444;
-}
-
-.contig-item:last-child {
-  border-bottom: none;
-}
-
-.contig-name {
-  font-weight: 500;
-}
-
-.contig-length,
-.contig-depth {
-  color: #666;
-  margin-left: 10px;
-}
-
-.app.dark-mode .contig-length,
-.app.dark-mode .contig-depth {
-  color: #aaa;
-}
-
 /* Visualization */
 .visualization-section h3 {
   margin: 0 0 10px 0;
@@ -1461,6 +1432,26 @@ canvas {
 .stats-section h3 {
   margin: 0 0 15px 0;
   font-size: 16px;
+}
+
+.length-distribution canvas {
+  display: block;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+.app.dark-mode .length-distribution canvas {
+  border-color: #333;
+}
+
+.length-distribution-readout {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #666;
+}
+
+.app.dark-mode .length-distribution-readout {
+  color: #aaa;
 }
 
 /* Footer */

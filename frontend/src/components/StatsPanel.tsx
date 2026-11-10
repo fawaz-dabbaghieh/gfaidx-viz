@@ -1,4 +1,4 @@
-import { getGraphStats } from '../data/exampleGraphs'
+import { getGraphStats } from '../utils/graphStats'
 import type { Graph } from '../types'
 
 interface StatsPanelProps {
@@ -7,9 +7,7 @@ interface StatsPanelProps {
 }
 
 export function StatsPanel({ graph, layoutDuration }: StatsPanelProps) {
-  // Stats are derived on demand from the currently loaded graph rather than
-  // cached in App state because the computation is small and keeps this panel
-  // self-contained.
+  // Cached per graph in getGraphStats, so reopening the dialog is cheap.
   const stats = getGraphStats(graph)
 
   const formatNumber = (num: number): string => {
@@ -60,34 +58,12 @@ export function StatsPanel({ graph, layoutDuration }: StatsPanelProps) {
           <div className="stat-value">{formatNumber(stats.medianLength)}bp</div>
         </div>
 
-        <div className="stat-item">
-          <div className="stat-label">Depth Range</div>
-          <div className="stat-value">
-            {stats.minDepth.toFixed(1)}x - {stats.maxDepth.toFixed(1)}x
-          </div>
-        </div>
-
         {layoutDuration && (
           <div className="stat-item highlight">
             <div className="stat-label">Layout Time</div>
             <div className="stat-value">{layoutDuration.toFixed(1)}ms</div>
           </div>
         )}
-      </div>
-
-      <div className="contigs-list">
-        <h4>Contigs (sorted by length)</h4>
-        <div className="contigs-scroll">
-          {stats.uniqueNodes.map(node => (
-            <div key={node.id} className="contig-item">
-              <span className="contig-name">{node.name}</span>
-              <span className="contig-length">
-                {formatNumber(node.length)}bp
-              </span>
-              <span className="contig-depth">{node.depth.toFixed(1)}x</span>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   )
