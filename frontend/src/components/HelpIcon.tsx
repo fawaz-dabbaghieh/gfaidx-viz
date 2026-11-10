@@ -17,9 +17,8 @@ interface TooltipPosition {
 //
 // The tooltip itself is portaled to document.body and positioned from the
 // icon's live bounding rect rather than pinned via CSS position:absolute,
-// because several call sites sit inside a collapsible panel
-// (.advanced-settings) that clips overflow for its own rounded corners - a
-// CSS-anchored tooltip would get cut off there.
+// because call sites can sit inside panels that clip or scroll their
+// overflow - a CSS-anchored tooltip would get cut off there.
 const VIEWPORT_MARGIN = 8
 
 export function HelpIcon({ text }: HelpIconProps) {

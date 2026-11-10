@@ -10,8 +10,6 @@ import type {
   LayoutResult,
   Graph,
   Transform,
-  ContextMenu,
-  DetailsDialog,
   GraphNode,
   ColorScheme,
 } from '../types'
@@ -23,7 +21,14 @@ import {
   stripNodeOrientation,
   resolveTraversalEdge,
   resolveTraversalPathName,
+  groupEdgeTraversalsByDirection,
+  countPathVisitsToNode,
 } from '../utils/displayGraph'
+import {
+  SelectionInfoPanel,
+  SELECTION_INFO_PANEL_DEFAULT_WIDTH,
+  type SelectionInfo,
+} from './SelectionInfoPanel'
 import { clampZoom } from '../utils/zoom'
 import { type GeneRecord, stripPanSNPrefix } from '../utils/geneTrackBed'
 
@@ -258,12 +263,24 @@ interface GraphCanvasProps {
   // the Paths legend, each drawn as its own colored line.
   copyNumberPathNames?: string[]
   onUseAsStartNode?: (nodeId: string) => void
+  // Sized by App, which also fits the canvas into whatever width is left.
+  infoPanelWidth?: number
+  infoPanelMaxWidth?: number
+  onInfoPanelWidthChange?: (width: number) => void
   debugHitboxes?: boolean // Hidden flag to visualize edge hit areas
 }
 
 const SEQUENCE_PREVIEW_CUTOFF = 100
 const SEQUENCE_PREVIEW_PREFIX_LENGTH = Math.ceil(SEQUENCE_PREVIEW_CUTOFF / 2)
 const SEQUENCE_PREVIEW_SUFFIX_LENGTH = Math.floor(SEQUENCE_PREVIEW_CUTOFF / 2)
+// Rows shown in the edge hover tooltip before it defers to the info panel.
+const EDGE_TOOLTIP_MAX_PATHS = 10
+// Pointer travel (px) between mousedown and mouseup still treated as a click.
+const CLICK_MOVE_TOLERANCE_PX = 4
+// A path crossing an edge several times (e.g. a repeat) is drawn as one
+// parallel line per crossing up to this cap, so repeats stand out without a
+// heavily looping path fanning out; the exact count is in the tooltip/panel.
+const MAX_DRAWN_REPEATS_PER_PATH = 5
 // Wheel devices report very different delta sizes, so cap each rotation update
 // while retaining small trackpad deltas for continuous motion.
 const ROTATION_RADIANS_PER_PIXEL = 0.002
@@ -331,6 +348,9 @@ function GraphCanvasComponent({
   geneTrackAnnotations,
   copyNumberPathNames,
   onUseAsStartNode,
+  infoPanelWidth = SELECTION_INFO_PANEL_DEFAULT_WIDTH,
+  infoPanelMaxWidth = infoPanelWidth,
+  onInfoPanelWidthChange,
   debugHitboxes = false,
 }: GraphCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -398,16 +418,12 @@ function GraphCanvasComponent({
     string,
     { x: number; y: number }[]
   > | null>(null)
-  const [contextMenu, setContextMenu] = useState<ContextMenu>({
-    visible: false,
-    x: 0,
-    y: 0,
-    nodeId: null,
-  })
-  const [detailsDialog, setDetailsDialog] = useState<DetailsDialog>({
-    visible: false,
-    nodeId: null,
-  })
+  // The clicked connection shown in the info panel, by DisplayEdge.key
+  // (stable across path filtering, unlike an index); a clicked node uses
+  // selectedNode.
+  const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null)
+  // Where the left button went down, to tell a click from a pan.
+  const pointerDownRef = useRef<{ x: number; y: number } | null>(null)
   const activeNodePositions = useMemo(
     () => modifiedNodePositions || layoutResult.nodePositions,
     [layoutResult.nodePositions, modifiedNodePositions],
@@ -689,9 +705,15 @@ function GraphCanvasComponent({
     [],
   )
 
-  // Calculate bounds once when layout changes
+  // Fit the view once per new layout. The canvas now follows the window size,
+  // so a resize alone must not refit (that would also drop dragged nodes);
+  // the effect below keeps the view centred instead.
+  const fittedLayoutRef = useRef<LayoutResult | null>(null)
+  const lastCanvasSizeRef = useRef({ width, height })
   useEffect(() => {
-    if (!layoutResult) return
+    if (!layoutResult || fittedLayoutRef.current === layoutResult) return
+    fittedLayoutRef.current = layoutResult
+    lastCanvasSizeRef.current = { width, height }
 
     const { nodePositions } = layoutResult
     let minX = Infinity,
@@ -735,6 +757,21 @@ function GraphCanvasComponent({
     // Reset modified positions when layout changes
     setModifiedNodePositions(null)
   }, [layoutResult, width, height, reportInternalZoom])
+
+  useEffect(() => {
+    const lastSize = lastCanvasSizeRef.current
+    if (lastSize.width === width && lastSize.height === height) return
+    lastCanvasSizeRef.current = { width, height }
+
+    const prev = transformRef.current
+    const nextTransform = {
+      ...prev,
+      translateX: prev.translateX + (width - lastSize.width) / 2,
+      translateY: prev.translateY + (height - lastSize.height) / 2,
+    }
+    transformRef.current = nextTransform
+    setTransform(nextTransform)
+  }, [width, height])
 
   // Sync zoom prop to transform when the sidebar slider sends an explicit
   // command. Wheel zoom intentionally does not update this prop.
@@ -832,6 +869,7 @@ function GraphCanvasComponent({
     transformRef.current = nextTransform
     setTransform(nextTransform)
     setSelectedNode(targetNode.representativeId)
+    setSelectedEdgeKey(null)
     setHoveredNode(null)
     setHoveredEdge(null)
     reportInternalZoom(nextScale)
@@ -860,6 +898,9 @@ function GraphCanvasComponent({
     [pathColors],
   )
 
+  // One entry per line to draw: each visible traversal, repeated (adjacent,
+  // so it reads as a same-coloured band) once per crossing up to
+  // MAX_DRAWN_REPEATS_PER_PATH.
   const visiblePathTraversalsByList = useMemo(() => {
     const visibleTraversals = new Map<Int32Array, Int32Array>()
     const paths = graph.paths ?? []
@@ -871,15 +912,27 @@ function GraphCanvasComponent({
         visiblePathIds?.size === 0
       ) {
         visibleTraversals.set(edge.pathTraversals, NO_PATH_TRAVERSALS)
-      } else if (!visiblePathIds) {
+      } else if (
+        !visiblePathIds &&
+        edge.traversalCounts.every(count => count === 1)
+      ) {
         visibleTraversals.set(edge.pathTraversals, edge.pathTraversals)
       } else {
-        visibleTraversals.set(
-          edge.pathTraversals,
-          edge.pathTraversals.filter(encoded =>
-            visiblePathIds.has(resolveTraversalPathName(encoded, paths)),
-          ),
-        )
+        const lines: number[] = []
+        edge.pathTraversals.forEach((encoded, i) => {
+          if (
+            visiblePathIds &&
+            !visiblePathIds.has(resolveTraversalPathName(encoded, paths))
+          ) {
+            return
+          }
+          const repeats = Math.min(
+            edge.traversalCounts[i]!,
+            MAX_DRAWN_REPEATS_PER_PATH,
+          )
+          for (let repeat = 0; repeat < repeats; repeat++) lines.push(encoded)
+        })
+        visibleTraversals.set(edge.pathTraversals, Int32Array.from(lines))
       }
     }
 
@@ -898,7 +951,7 @@ function GraphCanvasComponent({
     setHoveredNode(null)
     setHoveredEdge(null)
     setSelectedNode(null)
-    setContextMenu({ visible: false, x: 0, y: 0, nodeId: null })
+    setSelectedEdgeKey(null)
   }, [visibleDisplayGraphTopology])
 
   // Colors depend on graph data and user settings, not the viewport. Cache
@@ -1615,7 +1668,8 @@ function GraphCanvasComponent({
         return
       }
 
-      const isHovered = hoveredEdge === edgeIdx
+      const isHovered =
+        hoveredEdge === edgeIdx || displayEdge.key === selectedEdgeKey
       const visiblePathTraversals = getVisiblePathTraversals(
         displayEdge.pathTraversals,
       )
@@ -2237,6 +2291,7 @@ function GraphCanvasComponent({
     hoveredNode,
     hoveredEdge,
     selectedNode,
+    selectedEdgeKey,
     isDarkMode,
     getNodeColor,
     displayGraph,
@@ -2458,7 +2513,6 @@ function GraphCanvasComponent({
       if (e.button === 0) {
         // Left click
         setDragStart({ x: e.clientX, y: e.clientY })
-        setContextMenu({ visible: false, x: 0, y: 0, nodeId: null })
 
         // Gene track click: "select" per the spec is deliberately minimal
         // for now (logging), since this is explicitly a secondary feature
@@ -2470,13 +2524,15 @@ function GraphCanvasComponent({
           return
         }
 
+        pointerDownRef.current = { x: e.clientX, y: e.clientY }
         if (hoveredNode) {
           // Prepare for node dragging
           setDraggingNodeId(hoveredNode)
           setSelectedNode(hoveredNode)
+          setSelectedEdgeKey(null)
         } else {
-          setSelectedNode(null)
-          // Prepare for view panning
+          // Prepare for view panning. Selection only changes on mouseup, and
+          // only if the pointer didn't move, so panning keeps the panel.
           setIsDragging(true)
         }
       }
@@ -2918,607 +2974,370 @@ function GraphCanvasComponent({
   // Handle mouse up
   const handleMouseUp = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      // If we were preparing to drag a node but didn't actually drag, show context menu
-      if (draggingNodeId && !isDraggingNode && canvasRef.current) {
-        const rect = canvasRef.current.getBoundingClientRect()
-        setContextMenu({
-          visible: true,
-          x: e.clientX - rect.left,
-          y: e.clientY - rect.top,
-          nodeId: draggingNodeId,
-        })
+      // A click (not a pan) on a connection selects it for the info panel;
+      // on empty space it clears the panel. Nodes are selected on mousedown.
+      const pointerDown = pointerDownRef.current
+      pointerDownRef.current = null
+      if (
+        pointerDown &&
+        !draggingNodeId &&
+        Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y) <=
+          CLICK_MOVE_TOLERANCE_PX
+      ) {
+        const clickedEdge =
+          hoveredEdge !== null ? displayGraph.edges[hoveredEdge] : undefined
+        setSelectedEdgeKey(clickedEdge?.key ?? null)
+        setSelectedNode(null)
       }
 
       setIsDragging(false)
       setIsDraggingNode(false)
       setDraggingNodeId(null)
     },
-    [draggingNodeId, isDraggingNode],
+    [draggingNodeId, hoveredEdge, displayGraph.edges],
   )
 
-  // Close context menu when clicking outside
-  useEffect(() => {
-    if (!contextMenu.visible) return
+  const isPathVisible = useCallback(
+    (pathName: string) =>
+      drawPaths && (!visiblePathIds || visiblePathIds.has(pathName)),
+    [drawPaths, visiblePathIds],
+  )
 
-    const handleClickOutside = (e: MouseEvent) => {
-      if (!(e.target as Element).closest('.context-menu')) {
-        setContextMenu({ visible: false, x: 0, y: 0, nodeId: null })
-      }
+  // Built from the topology rather than the positioned displayGraph so
+  // dragging the selected node doesn't recount path visits every frame.
+  const selectedNodeInfo = useMemo((): SelectionInfo | null => {
+    if (!selectedNode) return null
+    const displayNode = visibleDisplayGraphTopology.nodesByKey.get(
+      stripNodeOrientation(selectedNode),
+    )
+    if (!displayNode) return null
+    const sequence = getNodeSequence(displayNode.node)
+    return {
+      kind: 'node',
+      node: displayNode.node,
+      sequencePreview: sequence ? formatSequencePreview(sequence) : null,
+      csvMetadata: nodeCsvMetadata?.[displayNode.node.id],
+      paths: countPathVisitsToNode(displayNode, graph.paths ?? []),
     }
+  }, [selectedNode, visibleDisplayGraphTopology, nodeCsvMetadata, graph.paths])
 
-    // Delay attaching the handler to avoid immediate closure
-    const timer = setTimeout(() => {
-      document.addEventListener('click', handleClickOutside)
-    }, 100)
-
-    return () => {
-      clearTimeout(timer)
-      document.removeEventListener('click', handleClickOutside)
+  const selectedEdgeInfo = useMemo((): SelectionInfo | null => {
+    if (!selectedEdgeKey) return null
+    const edge = visibleDisplayGraphTopology.edges.find(
+      candidate => candidate.key === selectedEdgeKey,
+    )
+    if (!edge) return null
+    const { nodesByKey } = visibleDisplayGraphTopology
+    const fromNode = nodesByKey.get(edge.fromNodeKey)?.node
+    const toNode = nodesByKey.get(edge.toNodeKey)?.node
+    if (!fromNode || !toNode) return null
+    return {
+      kind: 'edge',
+      fromName: fromNode.name,
+      toName: toNode.name,
+      groups: groupEdgeTraversalsByDirection(edge, graph.paths ?? []),
+      totalPathCount: edge.pathIds.length,
+      visiblePathCount: edge.pathIds.filter(isPathVisible).length,
     }
-  }, [contextMenu.visible])
-
-  // Close details dialog with Escape key
-  useEffect(() => {
-    if (!detailsDialog.visible) return
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setDetailsDialog({ visible: false, nodeId: null })
-      }
-    }
-
-    document.addEventListener('keydown', handleEscape)
-    return () => document.removeEventListener('keydown', handleEscape)
-  }, [detailsDialog.visible])
+  }, [selectedEdgeKey, visibleDisplayGraphTopology, graph.paths, isPathVisible])
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block' }}>
-      <canvas
-        ref={canvasRef}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        style={{
-          border: isDarkMode ? '1px solid #333' : '1px solid #ddd',
-          borderRadius: '8px',
-          backgroundColor: isDarkMode ? '#1a1a1a' : '#ffffff',
-          cursor: 'default',
-          display: 'block',
-        }}
-      />
-
-      {/* Context menu */}
-      {contextMenu.visible && (
-        <div
-          className="context-menu"
+    <div className="graph-canvas-with-info">
+      <div style={{ position: 'relative', display: 'inline-block' }}>
+        <canvas
+          ref={canvasRef}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
           style={{
-            position: 'absolute',
-            left: `${contextMenu.x}px`,
-            top: `${contextMenu.y}px`,
-            background: isDarkMode ? '#2a2a2a' : 'white',
-            border: isDarkMode ? '1px solid #555' : '1px solid #ccc',
-            borderRadius: '4px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-            zIndex: 1000,
-            minWidth: '150px',
+            border: isDarkMode ? '1px solid #333' : '1px solid #ddd',
+            borderRadius: '8px',
+            backgroundColor: isDarkMode ? '#1a1a1a' : '#ffffff',
+            cursor: 'default',
+            display: 'block',
           }}
-        >
-          <button
-            onClick={e => {
-              e.stopPropagation()
-              setDetailsDialog({ visible: true, nodeId: contextMenu.nodeId })
-              setContextMenu({ visible: false, x: 0, y: 0, nodeId: null })
-            }}
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              background: 'transparent',
-              border: 'none',
-              textAlign: 'left',
-              cursor: 'pointer',
-              fontSize: '13px',
-              color: isDarkMode ? '#e0e0e0' : '#333',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background = isDarkMode
-                ? '#3a3a3a'
-                : '#f0f0f0'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.background = 'transparent'
-            }}
-          >
-            View Details
-          </button>
-          {onUseAsStartNode && (
-            <button
-              onClick={e => {
-                e.stopPropagation()
-                const node = graph.nodes.find(
-                  candidate => candidate.id === contextMenu.nodeId,
-                )
-                if (node) {
-                  onUseAsStartNode(node.name)
-                }
-                setContextMenu({
-                  visible: false,
-                  x: 0,
-                  y: 0,
-                  nodeId: null,
-                })
-              }}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                background: 'transparent',
-                border: 'none',
-                borderTop: isDarkMode
-                  ? '1px solid #444'
-                  : '1px solid #ddd',
-                textAlign: 'left',
-                cursor: 'pointer',
-                fontSize: '13px',
-                color: isDarkMode ? '#e0e0e0' : '#333',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.background = isDarkMode
-                  ? '#3a3a3a'
-                  : '#f0f0f0'
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = 'transparent'
-              }}
-            >
-              Use as Start Node
-            </button>
-          )}
-        </div>
-      )}
+        />
 
-      {/* Details dialog */}
-      {detailsDialog.visible &&
-        (() => {
-          const node = graph.nodes.find(n => n.id === detailsDialog.nodeId)
-          if (!node) return null
-          const nodeSequence = getNodeSequence(node)
+        {/* Tooltip for nodes */}
+        {hoveredNode &&
+          !isDragging &&
+          !isDraggingNode &&
+          (() => {
+            const node = graph.nodes.find(n => n.id === hoveredNode)
+            if (!node) return null
 
-          return (
-            <div
-              style={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                background: 'rgba(0, 0, 0, 0.5)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 2000,
-              }}
-              onClick={() => setDetailsDialog({ visible: false, nodeId: null })}
-            >
-              <div
-                style={{
-                  background: isDarkMode ? '#2a2a2a' : 'white',
-                  borderRadius: '8px',
-                  padding: '20px',
-                  maxWidth: '500px',
-                  width: '90%',
-                  color: isDarkMode ? '#e0e0e0' : '#333',
-                }}
-                onClick={e => e.stopPropagation()}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: '15px',
-                    borderBottom: isDarkMode
-                      ? '1px solid #444'
-                      : '1px solid #ddd',
-                    paddingBottom: '10px',
-                  }}
-                >
-                  <h3 style={{ margin: 0, fontSize: '18px' }}>Node Details</h3>
-                  <button
-                    onClick={() =>
-                      setDetailsDialog({ visible: false, nodeId: null })
-                    }
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      fontSize: '24px',
-                      cursor: 'pointer',
-                      color: isDarkMode ? '#aaa' : '#666',
-                      padding: 0,
-                      width: '30px',
-                      height: '30px',
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '10px',
-                  }}
-                >
-                  <div>
-                    <strong>ID:</strong> {node.name}
-                  </div>
-                  <div>
-                    <strong>Length:</strong> {node.length.toLocaleString()} bp
-                  </div>
-                  <div>
-                    <strong>Depth:</strong> {node.depth.toFixed(2)}×
-                  </div>
-                  <div>
-                    <strong>Sequence:</strong>{' '}
-                    {nodeSequence ? (
-                      <span
-                        style={{
-                          fontFamily:
-                            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                          wordBreak: 'break-all',
-                        }}
-                      >
-                        {formatSequencePreview(nodeSequence)}
-                      </span>
-                    ) : (
-                      'Not available'
-                    )}
-                  </div>
-                  {node.tags && Object.keys(node.tags).length > 0 && (
-                    <div>
-                      <strong>Tags:</strong>
-                      <div
-                        style={{
-                          marginTop: '4px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '2px',
-                          fontFamily:
-                            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                          fontSize: '12px',
-                          wordBreak: 'break-all',
-                        }}
-                      >
-                        {Object.entries(node.tags).map(([tagName, tagValue]) => (
-                          <div key={tagName}>
-                            {tagName}: {tagValue}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {/* Feature A: any extra columns from a loaded node styling
-                      CSV (everything besides the name/colour/label columns). */}
-                  {nodeCsvMetadata?.[node.id] &&
-                    Object.keys(nodeCsvMetadata[node.id]!).length > 0 && (
-                      <div>
-                        <strong>CSV Metadata:</strong>
-                        <div
-                          style={{
-                            marginTop: '4px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '2px',
-                            fontSize: '12px',
-                            wordBreak: 'break-all',
-                          }}
-                        >
-                          {Object.entries(nodeCsvMetadata[node.id]!).map(
-                            ([column, value]) => (
-                              <div key={column}>
-                                {column}: {value}
-                              </div>
-                            ),
-                          )}
-                        </div>
-                      </div>
-                    )}
-                </div>
-              </div>
-            </div>
-          )
-        })()}
-
-      {/* Tooltip for nodes */}
-      {hoveredNode &&
-        !isDragging &&
-        !isDraggingNode &&
-        (() => {
-          const node = graph.nodes.find(n => n.id === hoveredNode)
-          if (!node) return null
-
-          return (
-            <div
-              ref={refs.setFloating}
-              style={{
-                ...floatingStyles,
-                position: 'absolute',
-                background: isDarkMode ? '#2a2a2a' : 'white',
-                border: isDarkMode ? '1px solid #555' : '1px solid #ccc',
-                borderRadius: '6px',
-                padding: '8px 12px',
-                fontSize: '13px',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-                zIndex: 1000,
-                pointerEvents: 'none',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <div style={{ color: isDarkMode ? '#fff' : '#000' }}>
-                <div>
-                  <strong>{node.name}</strong>
-                </div>
-                <div
-                  style={{ fontSize: '11px', marginTop: '4px', opacity: 0.8 }}
-                >
-                  {node.length.toLocaleString()} bp • {node.depth.toFixed(2)}×
-                  depth
-                </div>
-              </div>
-            </div>
-          )
-        })()}
-
-      {/* Tooltip for edges */}
-      {hoveredEdge !== null &&
-        !hoveredNode &&
-        !isDragging &&
-        !isDraggingNode &&
-        (() => {
-          const edge = displayGraph.edges[hoveredEdge]
-          if (!edge) return null
-
-          const fromNode = displayGraph.nodesByKey.get(edge.fromNodeKey)?.node
-          const toNode = displayGraph.nodesByKey.get(edge.toNodeKey)?.node
-          if (!fromNode || !toNode) return null
-
-          const graphPaths = graph.paths ?? []
-          const visiblePathTraversals = getVisiblePathTraversals(
-            edge.pathTraversals,
-          )
-          const visibleEdgePathIdSet = new Set(
-            Array.from(visiblePathTraversals, encoded =>
-              resolveTraversalPathName(encoded, graphPaths),
-            ),
-          )
-          const visibleEdgePathIds = Array.from(visibleEdgePathIdSet)
-
-          // Path overlays are directional even though the base graph edge is
-          // drawn as one collapsed connection. Always group every traversal
-          // for the tooltip; path visibility affects only the status/count.
-          const pathDirectionGroups = Array.from(
-            edge.pathTraversals.reduce(
-              (groups, encoded) => {
-                const traversalEdge = resolveTraversalEdge(
-                  encoded,
-                  edge.representativeEdge,
-                )
-                const pathName = resolveTraversalPathName(encoded, graphPaths)
-                const directionKey = `${traversalEdge.from}->${traversalEdge.to}`
-                const existingGroup = groups.get(directionKey)
-
-                if (existingGroup) {
-                  existingGroup.pathIds.add(pathName)
-                } else {
-                  groups.set(directionKey, {
-                    from: traversalEdge.from,
-                    to: traversalEdge.to,
-                    pathIds: new Set([pathName]),
-                  })
-                }
-
-                return groups
-              },
-              new Map<
-                string,
-                { from: string; to: string; pathIds: Set<string> }
-              >(),
-            ).values(),
-          ).map(group => ({
-            ...group,
-            pathIds: Array.from(group.pathIds),
-          }))
-
-          return (
-            <div
-              ref={refs.setFloating}
-              style={{
-                ...floatingStyles,
-                position: 'absolute',
-                background: isDarkMode ? '#2a2a2a' : 'white',
-                border: isDarkMode ? '1px solid #555' : '1px solid #ccc',
-                borderRadius: '6px',
-                padding: '8px 12px',
-                fontSize: '13px',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-                zIndex: 1000,
-                pointerEvents: 'none',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <div style={{ color: isDarkMode ? '#fff' : '#000' }}>
-                <div>
-                  <strong>Connection</strong>
-                </div>
-                <div
-                  style={{ fontSize: '11px', marginTop: '4px', opacity: 0.8 }}
-                >
-                  {fromNode.name} — {toNode.name}
-                </div>
-                {edge.pathIds.length > 0 && (
-                  <div
-                    style={{
-                      fontSize: '11px',
-                      marginTop: '6px',
-                      paddingTop: '6px',
-                      borderTop: isDarkMode
-                        ? '1px solid #444'
-                        : '1px solid #ddd',
-                    }}
-                  >
-                    <div style={{ marginBottom: '3px', opacity: 0.9 }}>
-                      <strong>
-                        Paths ({visibleEdgePathIds.length} visible /{' '}
-                        {edge.pathIds.length} total):
-                      </strong>
-                    </div>
-                    {pathDirectionGroups.map(group => (
-                      <div
-                        key={`${group.from}->${group.to}`}
-                        style={{ marginTop: '5px' }}
-                      >
-                        <div style={{ marginLeft: '8px', opacity: 0.9 }}>
-                          <strong>
-                            {group.from} → {group.to}
-                          </strong>
-                        </div>
-                        {group.pathIds.map(pathId => (
-                          <div
-                            key={`${group.from}->${group.to}:${pathId}`}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              marginLeft: '18px',
-                              opacity: visibleEdgePathIdSet.has(pathId)
-                                ? 0.9
-                                : 0.55,
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: '12px',
-                                height: '12px',
-                                backgroundColor: getPathColor(pathId),
-                                borderRadius: '2px',
-                                flexShrink: 0,
-                              }}
-                            />
-                            {pathId}
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )
-        })()}
-
-      {/* Tooltip for the gene track (Feature B). A plain fixed-position div
-          rather than the shared floating-ui instance above: the track only
-          ever occupies the bottom screen-space band, so there's no need for
-          floating-ui's flip/shift collision handling to keep it on screen -
-          placing it just above the cursor is always safe here. */}
-      {hoveredGene && (
-        <div
-          style={{
-            position: 'fixed',
-            left: hoveredGene.screenX,
-            top: hoveredGene.screenY,
-            transform: 'translate(-50%, -100%)',
-            marginTop: -10,
-            background: isDarkMode ? '#2a2a2a' : 'white',
-            border: isDarkMode ? '1px solid #555' : '1px solid #ccc',
-            borderRadius: '6px',
-            padding: '8px 12px',
-            fontSize: '13px',
-            boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-            zIndex: 1000,
-            pointerEvents: 'none',
-            whiteSpace: 'nowrap',
-            color: isDarkMode ? '#fff' : '#000',
-          }}
-        >
-          <div>
-            <strong>{hoveredGene.gene.name}</strong>
-          </div>
-          <div style={{ fontSize: '11px', opacity: 0.8 }}>
-            {hoveredGene.gene.chrom}:{hoveredGene.gene.start.toLocaleString()}-
-            {hoveredGene.gene.end.toLocaleString()} (
-            {(hoveredGene.gene.end - hoveredGene.gene.start).toLocaleString()}{' '}
-            bp)
-            {hoveredGene.gene.strand && ` - strand ${hoveredGene.gene.strand}`}
-          </div>
-        </div>
-      )}
-
-      {/* Tooltip for the copy-number track (Feature C). Lists every currently
-          toggled path's value at the hovered bin, not just whichever line
-          happens to be closest in y - with several paths potentially
-          overlapping at the same bin, showing all of them is more useful
-          than guessing which one the user meant to hover. */}
-      {hoveredCopyNumberBin && copyNumberTracks && (
-        <div
-          style={{
-            position: 'fixed',
-            left: hoveredCopyNumberBin.screenX,
-            top: hoveredCopyNumberBin.screenY,
-            transform: 'translate(-50%, -100%)',
-            marginTop: -10,
-            background: isDarkMode ? '#2a2a2a' : 'white',
-            border: isDarkMode ? '1px solid #555' : '1px solid #ccc',
-            borderRadius: '6px',
-            padding: '8px 12px',
-            fontSize: '13px',
-            boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-            zIndex: 1000,
-            pointerEvents: 'none',
-            whiteSpace: 'nowrap',
-            color: isDarkMode ? '#fff' : '#000',
-          }}
-        >
-          <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: 4 }}>
-            {Math.round(
-              copyNumberTracks.firstBp +
-                hoveredCopyNumberBin.binIndex * copyNumberTracks.binSizeBp,
-            ).toLocaleString()}
-            {' - '}
-            {Math.round(
-              copyNumberTracks.firstBp +
-                (hoveredCopyNumberBin.binIndex + 1) *
-                  copyNumberTracks.binSizeBp,
-            ).toLocaleString()}
-          </div>
-          {Array.from(copyNumberTracks.tracks, ([pathName, bins]) => {
-            const value = bins[hoveredCopyNumberBin.binIndex]
-            if (value === null) return null
             return (
               <div
-                key={pathName}
-                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                ref={refs.setFloating}
+                style={{
+                  ...floatingStyles,
+                  position: 'absolute',
+                  background: isDarkMode ? '#2a2a2a' : 'white',
+                  border: isDarkMode ? '1px solid #555' : '1px solid #ccc',
+                  borderRadius: '6px',
+                  padding: '8px 12px',
+                  fontSize: '13px',
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+                  zIndex: 1000,
+                  pointerEvents: 'none',
+                  whiteSpace: 'nowrap',
+                }}
               >
-                <span
-                  style={{
-                    display: 'inline-block',
-                    width: 10,
-                    height: 10,
-                    borderRadius: '50%',
-                    background: getPathColor(pathName),
-                    flexShrink: 0,
-                  }}
-                />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {pathName}
-                </span>
-                <strong style={{ marginLeft: 'auto' }}>
-                  {value.toFixed(1)}×
-                </strong>
+                <div style={{ color: isDarkMode ? '#fff' : '#000' }}>
+                  <div>
+                    <strong>{node.name}</strong>
+                  </div>
+                  <div
+                    style={{ fontSize: '11px', marginTop: '4px', opacity: 0.8 }}
+                  >
+                    {node.length.toLocaleString()} bp • {node.depth.toFixed(2)}×
+                    depth
+                  </div>
+                </div>
               </div>
             )
-          })}
-        </div>
-      )}
+          })()}
+
+        {/* Tooltip for edges. The path list is capped so it stays on screen;
+            clicking the connection lists every path in the info panel. */}
+        {hoveredEdge !== null &&
+          !hoveredNode &&
+          !isDragging &&
+          !isDraggingNode &&
+          (() => {
+            const edge = displayGraph.edges[hoveredEdge]
+            if (!edge) return null
+
+            const fromNode = displayGraph.nodesByKey.get(edge.fromNodeKey)?.node
+            const toNode = displayGraph.nodesByKey.get(edge.toNodeKey)?.node
+            if (!fromNode || !toNode) return null
+
+            // Path overlays are directional even though the base graph edge is
+            // drawn as one collapsed connection. Always group every traversal
+            // for the tooltip; path visibility affects only the status/count.
+            const pathDirectionGroups = groupEdgeTraversalsByDirection(
+              edge,
+              graph.paths ?? [],
+            )
+            const totalRows = pathDirectionGroups.reduce(
+              (sum, group) => sum + group.paths.length,
+              0,
+            )
+            let remainingRows = EDGE_TOOLTIP_MAX_PATHS
+            const shownGroups = pathDirectionGroups.flatMap(group => {
+              const paths = group.paths.slice(0, remainingRows)
+              remainingRows -= paths.length
+              return paths.length > 0 ? [{ ...group, paths }] : []
+            })
+            const hiddenRows = totalRows - (EDGE_TOOLTIP_MAX_PATHS - remainingRows)
+
+            return (
+              <div
+                ref={refs.setFloating}
+                style={{
+                  ...floatingStyles,
+                  position: 'absolute',
+                  background: isDarkMode ? '#2a2a2a' : 'white',
+                  border: isDarkMode ? '1px solid #555' : '1px solid #ccc',
+                  borderRadius: '6px',
+                  padding: '8px 12px',
+                  fontSize: '13px',
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+                  zIndex: 1000,
+                  pointerEvents: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <div style={{ color: isDarkMode ? '#fff' : '#000' }}>
+                  <div>
+                    <strong>Connection</strong>
+                  </div>
+                  <div
+                    style={{ fontSize: '11px', marginTop: '4px', opacity: 0.8 }}
+                  >
+                    {fromNode.name} — {toNode.name}
+                  </div>
+                  {edge.pathIds.length > 0 && (
+                    <div
+                      style={{
+                        fontSize: '11px',
+                        marginTop: '6px',
+                        paddingTop: '6px',
+                        borderTop: isDarkMode
+                          ? '1px solid #444'
+                          : '1px solid #ddd',
+                      }}
+                    >
+                      <div style={{ marginBottom: '3px', opacity: 0.9 }}>
+                        <strong>
+                          Paths ({edge.pathIds.filter(isPathVisible).length}{' '}
+                          visible / {edge.pathIds.length} total):
+                        </strong>
+                      </div>
+                      {shownGroups.map(group => (
+                        <div
+                          key={`${group.from}->${group.to}`}
+                          style={{ marginTop: '5px' }}
+                        >
+                          <div style={{ marginLeft: '8px', opacity: 0.9 }}>
+                            <strong>
+                              {group.from} → {group.to}
+                            </strong>
+                          </div>
+                          {group.paths.map(({ name, count }) => (
+                            <div
+                              key={`${group.from}->${group.to}:${name}`}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                marginLeft: '18px',
+                                opacity: isPathVisible(name) ? 0.9 : 0.55,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: '12px',
+                                  height: '12px',
+                                  backgroundColor: getPathColor(name),
+                                  borderRadius: '2px',
+                                  flexShrink: 0,
+                                }}
+                              />
+                              {name}
+                              {count > 1 && ` (${count}×)`}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                      {hiddenRows > 0 && (
+                        <div style={{ marginTop: '6px', opacity: 0.7 }}>
+                          +{hiddenRows} more, click the connection to see all
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
+
+        {/* Tooltip for the gene track (Feature B). A plain fixed-position div
+            rather than the shared floating-ui instance above: the track only
+            ever occupies the bottom screen-space band, so there's no need for
+            floating-ui's flip/shift collision handling to keep it on screen -
+            placing it just above the cursor is always safe here. */}
+        {hoveredGene && (
+          <div
+            style={{
+              position: 'fixed',
+              left: hoveredGene.screenX,
+              top: hoveredGene.screenY,
+              transform: 'translate(-50%, -100%)',
+              marginTop: -10,
+              background: isDarkMode ? '#2a2a2a' : 'white',
+              border: isDarkMode ? '1px solid #555' : '1px solid #ccc',
+              borderRadius: '6px',
+              padding: '8px 12px',
+              fontSize: '13px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+              zIndex: 1000,
+              pointerEvents: 'none',
+              whiteSpace: 'nowrap',
+              color: isDarkMode ? '#fff' : '#000',
+            }}
+          >
+            <div>
+              <strong>{hoveredGene.gene.name}</strong>
+            </div>
+            <div style={{ fontSize: '11px', opacity: 0.8 }}>
+              {hoveredGene.gene.chrom}:{hoveredGene.gene.start.toLocaleString()}-
+              {hoveredGene.gene.end.toLocaleString()} (
+              {(hoveredGene.gene.end - hoveredGene.gene.start).toLocaleString()}{' '}
+              bp)
+              {hoveredGene.gene.strand && ` - strand ${hoveredGene.gene.strand}`}
+            </div>
+          </div>
+        )}
+
+        {/* Tooltip for the copy-number track (Feature C). Lists every currently
+            toggled path's value at the hovered bin, not just whichever line
+            happens to be closest in y - with several paths potentially
+            overlapping at the same bin, showing all of them is more useful
+            than guessing which one the user meant to hover. */}
+        {hoveredCopyNumberBin && copyNumberTracks && (
+          <div
+            style={{
+              position: 'fixed',
+              left: hoveredCopyNumberBin.screenX,
+              top: hoveredCopyNumberBin.screenY,
+              transform: 'translate(-50%, -100%)',
+              marginTop: -10,
+              background: isDarkMode ? '#2a2a2a' : 'white',
+              border: isDarkMode ? '1px solid #555' : '1px solid #ccc',
+              borderRadius: '6px',
+              padding: '8px 12px',
+              fontSize: '13px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+              zIndex: 1000,
+              pointerEvents: 'none',
+              whiteSpace: 'nowrap',
+              color: isDarkMode ? '#fff' : '#000',
+            }}
+          >
+            <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: 4 }}>
+              {Math.round(
+                copyNumberTracks.firstBp +
+                  hoveredCopyNumberBin.binIndex * copyNumberTracks.binSizeBp,
+              ).toLocaleString()}
+              {' - '}
+              {Math.round(
+                copyNumberTracks.firstBp +
+                  (hoveredCopyNumberBin.binIndex + 1) *
+                    copyNumberTracks.binSizeBp,
+              ).toLocaleString()}
+            </div>
+            {Array.from(copyNumberTracks.tracks, ([pathName, bins]) => {
+              const value = bins[hoveredCopyNumberBin.binIndex]
+              if (value === null) return null
+              return (
+                <div
+                  key={pathName}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      background: getPathColor(pathName),
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {pathName}
+                  </span>
+                  <strong style={{ marginLeft: 'auto' }}>
+                    {value.toFixed(1)}×
+                  </strong>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+      <SelectionInfoPanel
+        selection={selectedEdgeInfo ?? selectedNodeInfo}
+        width={infoPanelWidth}
+        maxWidth={infoPanelMaxWidth}
+        onWidthChange={onInfoPanelWidthChange}
+        height={height}
+        getPathColor={getPathColor}
+        isPathVisible={isPathVisible}
+        onUseAsStartNode={onUseAsStartNode}
+      />
     </div>
   )
 }

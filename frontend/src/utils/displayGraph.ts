@@ -69,7 +69,13 @@ export interface DisplayEdge {
   fromNodeKey: string
   toNodeKey: string
   pathIds: string[]
+  // One entry per (path, direction), even when a path loops through this
+  // edge several times (e.g. a repeat in a pggb graph); the canvas caps how
+  // many parallel lines it draws for such repeats.
   pathTraversals: Int32Array
+  // Parallel to pathTraversals: how many times that path crossed the edge in
+  // that direction.
+  traversalCounts: Uint32Array
 }
 
 export interface DisplayGraph {
@@ -198,6 +204,13 @@ export function buildDisplayGraph(graph: Graph): DisplayGraph {
       representativeEdge: GraphEdge
       groupedEdges: GraphEdge[]
       traversals: number[]
+      counts: number[]
+      // A path's crossings of an edge all happen while that one path is
+      // being walked below, so remembering where the current path's forward
+      // and reverse entries sit is enough to dedupe without a per-edge map.
+      currentPathIndex: number
+      forwardSlot: number
+      reverseSlot: number
     }
   >()
   for (const [key, groupedEdges] of edgeGroups) {
@@ -205,6 +218,10 @@ export function buildDisplayGraph(graph: Graph): DisplayGraph {
       representativeEdge: chooseRepresentativeEdge(groupedEdges, nodesByKey),
       groupedEdges,
       traversals: [],
+      counts: [],
+      currentPathIndex: -1,
+      forwardSlot: -1,
+      reverseSlot: -1,
     })
   }
 
@@ -227,12 +244,26 @@ export function buildDisplayGraph(graph: Graph): DisplayGraph {
       const isForward =
         from === shell.representativeEdge.from &&
         to === shell.representativeEdge.to
+
+      if (shell.currentPathIndex !== pathIndex) {
+        shell.currentPathIndex = pathIndex
+        shell.forwardSlot = -1
+        shell.reverseSlot = -1
+      }
+      const slot = isForward ? shell.forwardSlot : shell.reverseSlot
+      if (slot >= 0) {
+        shell.counts[slot]!++
+        continue
+      }
+      if (isForward) shell.forwardSlot = shell.traversals.length
+      else shell.reverseSlot = shell.traversals.length
       shell.traversals.push(encodeTraversal(pathIndex, isForward))
+      shell.counts.push(1)
     }
   }
 
   const edges = Array.from(edgeShells.entries(), ([key, shell]) => {
-    const { representativeEdge, groupedEdges, traversals } = shell
+    const { representativeEdge, groupedEdges, traversals, counts } = shell
     const pathTraversals = Int32Array.from(traversals)
 
     const pathIndexSet = new Set<number>()
@@ -249,10 +280,71 @@ export function buildDisplayGraph(graph: Graph): DisplayGraph {
       toNodeKey: stripNodeOrientation(representativeEdge.to),
       pathIds,
       pathTraversals,
+      traversalCounts: Uint32Array.from(counts),
     }
   })
 
   return { nodes, nodesByKey, edges }
+}
+
+export interface EdgePathGroup {
+  from: string
+  to: string
+  // count = how many times the path crossed the edge in this direction
+  paths: { name: string; count: number }[]
+}
+
+// Groups an edge's traversals by the direction they actually run, for the
+// "which paths cross this connection" lists in the tooltip and info panel.
+export function groupEdgeTraversalsByDirection(
+  edge: DisplayEdge,
+  paths: GraphPath[],
+): EdgePathGroup[] {
+  const groups = new Map<
+    string,
+    { from: string; to: string; counts: Map<string, number> }
+  >()
+  edge.pathTraversals.forEach((encoded, i) => {
+    const { from, to } = resolveTraversalEdge(encoded, edge.representativeEdge)
+    const directionKey = `${from}->${to}`
+    let group = groups.get(directionKey)
+    if (!group) {
+      group = { from, to, counts: new Map() }
+      groups.set(directionKey, group)
+    }
+    // Keyed by name so two paths sharing a name still list once.
+    const name = resolveTraversalPathName(encoded, paths)
+    group.counts.set(
+      name,
+      (group.counts.get(name) ?? 0) + edge.traversalCounts[i]!,
+    )
+  })
+  return Array.from(groups.values(), ({ from, to, counts }) => ({
+    from,
+    to,
+    paths: Array.from(counts, ([name, count]) => ({ name, count })),
+  }))
+}
+
+// Counts how many times each path visits a node, in either orientation.
+export function countPathVisitsToNode(
+  displayNode: DisplayNode,
+  paths: GraphPath[],
+): { name: string; count: number }[] {
+  const nodeIds = new Set(displayNode.nodeIds)
+  // Path steps carry an orientation even when the graph only stores one.
+  nodeIds.add(`${displayNode.key}+`)
+  nodeIds.add(`${displayNode.key}-`)
+
+  const visits = new Map<string, number>()
+  for (const path of paths) {
+    let count = 0
+    for (const nodeId of path.nodeIds) {
+      if (nodeIds.has(nodeId)) count++
+    }
+    if (count > 0) visits.set(path.name, (visits.get(path.name) ?? 0) + count)
+  }
+  return Array.from(visits, ([name, count]) => ({ name, count }))
 }
 
 export function updateDisplayGraphNodePositions(

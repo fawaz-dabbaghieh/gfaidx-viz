@@ -1,11 +1,16 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { GraphCanvas } from './components/GraphCanvas'
 import { LengthDistribution } from './components/LengthDistribution'
-import { LayoutControls } from './components/LayoutControls'
+import { DisplayControls } from './components/DisplayControls'
+import { AdvancedControls } from './components/AdvancedControls'
+import {
+  SELECTION_INFO_PANEL_DEFAULT_WIDTH,
+  SELECTION_INFO_PANEL_GAP,
+  SELECTION_INFO_PANEL_MIN_WIDTH,
+} from './components/SelectionInfoPanel'
 import { PathsLegend } from './components/PathsLegend'
 import { StatsPanel } from './components/StatsPanel'
 import { GraphExtractionControls } from './components/GraphExtractionControls'
-import { BedAnnotationPanel } from './components/BedAnnotationPanel'
 import { NodeStyleCsvPanel } from './components/NodeStyleCsvPanel'
 import { BandageLayoutWorker } from './utils/BandageLayoutWorker'
 import { parseGFA } from './utils/gfaParser'
@@ -94,6 +99,21 @@ const BETA_BANNER_VERSION = '1'
 // before waiting on it - they can always download the graph and lay it out
 // with a desktop tool instead.
 const LARGE_GRAPH_NODE_WARNING_THRESHOLD = 50000
+
+// The canvas fills the graph section's width (minus the info panel) and about
+// one screen of height. CHROME is the section's own header and padding.
+const MIN_CANVAS_WIDTH = 400
+const MIN_CANVAS_HEIGHT = 480
+const GRAPH_SECTION_CHROME_HEIGHT = 90
+
+const CONTROL_TABS = [
+  { id: 'query', label: 'Query' },
+  { id: 'display', label: 'Display' },
+  { id: 'paths', label: 'Paths' },
+  { id: 'advanced', label: 'Advanced' },
+  { id: 'styling', label: 'Styling' },
+] as const
+type ControlTab = (typeof CONTROL_TABS)[number]['id']
 
 // Matches the Go backend's gfaidxMaxNodes cap (gfaidx 2.1.0+): gfaidx
 // reserves memory proportional to max_nodes up front, so the server rejects
@@ -259,9 +279,7 @@ function App({ worker, onStopLayout }: AppProps) {
   const [gfaidxJobProgress, setGfaidxJobProgress] =
     useState<GfaidxJobProgress | null>(null)
   const gfaidxJobAbortController = useRef<AbortController | null>(null)
-  const [rightPanelView, setRightPanelView] = useState<
-    'graph' | 'annotations' | 'styling'
-  >('graph')
+  const [controlTab, setControlTab] = useState<ControlTab>('query')
   const [bedAnnotations, setBedAnnotations] = useState<BedAnnotation[]>([])
   const [selectedBedAnnotation, setSelectedBedAnnotation] =
     useState<BedAnnotation | null>(null)
@@ -1200,6 +1218,50 @@ function App({ worker, onStopLayout }: AppProps) {
   const graphNodeCount =
     currentGraph?.sourceRecordCounts?.segments ?? currentGraph?.nodes.length ?? 0
   const isLargeGraph = graphNodeCount > LARGE_GRAPH_NODE_WARNING_THRESHOLD
+  const hasPathsInGraph = (currentGraph?.paths?.length ?? 0) > 0
+
+  const graphSectionRef = useRef<HTMLElement>(null)
+  const [graphSectionWidth, setGraphSectionWidth] = useState(1200)
+  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight)
+  // The info panel can be dragged wider to read long path names. The chosen
+  // width is remembered, and clamped so the canvas keeps its minimum width.
+  const [infoPanelWidth, setInfoPanelWidth] = useState(() => {
+    const saved = Number(localStorage.getItem('selectionInfoPanelWidth'))
+    return saved > 0 ? saved : SELECTION_INFO_PANEL_DEFAULT_WIDTH
+  })
+  useEffect(() => {
+    localStorage.setItem('selectionInfoPanelWidth', String(infoPanelWidth))
+  }, [infoPanelWidth])
+  useEffect(() => {
+    const section = graphSectionRef.current
+    if (!section) return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setGraphSectionWidth(Math.floor(entry.contentRect.width))
+    })
+    observer.observe(section)
+    const handleResize = () => setViewportHeight(window.innerHeight)
+    window.addEventListener('resize', handleResize)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [])
+  const maxInfoPanelWidth = Math.max(
+    SELECTION_INFO_PANEL_MIN_WIDTH,
+    graphSectionWidth - MIN_CANVAS_WIDTH - SELECTION_INFO_PANEL_GAP,
+  )
+  const clampedInfoPanelWidth = Math.min(
+    maxInfoPanelWidth,
+    Math.max(SELECTION_INFO_PANEL_MIN_WIDTH, infoPanelWidth),
+  )
+  const canvasWidth = Math.max(
+    MIN_CANVAS_WIDTH,
+    graphSectionWidth - clampedInfoPanelWidth - SELECTION_INFO_PANEL_GAP,
+  )
+  const canvasHeight = Math.max(
+    MIN_CANVAS_HEIGHT,
+    viewportHeight - GRAPH_SECTION_CHROME_HEIGHT,
+  )
 
   // Use a ref to track the current request ID, so a stale in-flight
   // computation (e.g. the user loaded a different graph, or hit Stop, while
@@ -1494,136 +1556,156 @@ function App({ worker, onStopLayout }: AppProps) {
       )}
 
       <main className="app-main">
-        <div className="left-panel">
-          <GraphExtractionControls
-            graphs={graphSelectionOptions}
-            selectedGraphId={selectedIndexedGraph}
-            onSelectedGraphIdChange={setSelectedIndexedGraph}
-            supportsExtraction={selectedGraphSupportsExtraction}
-            selectedGraphIsLocal={selectedGraphIsLocal}
-            graphListError={indexedGraphError}
-            isLoadingGraphs={isLoadingIndexedGraphs}
-            nodeMaxNodes={subgraphMaxNodes}
-            onNodeMaxNodesChange={setSubgraphMaxNodes}
-            regionMaxNodes={regionMaxNodes}
-            onRegionMaxNodesChange={setRegionMaxNodes}
-            withCoords={extractionWithCoords}
-            onWithCoordsChange={setExtractionWithCoords}
-            nodeStart={subgraphStartNode}
-            onNodeStartChange={setSubgraphStartNode}
-            onExtractNode={handleExtractSubgraph}
-            regionPaths={regionPaths}
-            selectedRegionPathIndex={selectedRegionPathIndex}
-            onSelectedRegionPathIndexChange={handleSelectedRegionPathChange}
-            regionPathError={regionPathError}
-            isLoadingRegionPaths={isLoadingRegionPaths}
-            manualRegionReference={manualRegionReference}
-            onManualRegionReferenceChange={setManualRegionReference}
-            manualRegionSequence={manualRegionSequence}
-            onManualRegionSequenceChange={setManualRegionSequence}
-            regionStart={regionStart}
-            onRegionStartChange={setRegionStart}
-            regionEnd={regionEnd}
-            onRegionEndChange={setRegionEnd}
-            allHaplotypes={extractAllHaplotypes}
-            onAllHaplotypesChange={setExtractAllHaplotypes}
-            onExtractRegion={handleExtractRegion}
-            isExtracting={isExtractingSubgraph}
-            jobProgress={gfaidxJobProgress}
-            extractionError={loadError}
-            extractionDownloadUrl={oversizedResultUrl}
-          />
-          <LayoutControls
-            options={layoutOptions}
-            onChange={setLayoutOptions}
-            onCompute={computeLayout}
-            isComputing={isComputing}
-            colorScheme={colorScheme}
-            onColorSchemeChange={setColorScheme}
-            zoom={displayZoom}
-            onZoomChange={handleControlZoomChange}
-            contigThickness={contigThickness}
-            onContigThicknessChange={setContigThickness}
-            connectorThickness={connectorThickness}
-            onConnectorThicknessChange={setConnectorThickness}
-            drawLabels={drawLabels}
-            onDrawLabelsChange={setDrawLabels}
-            labelLengthThreshold={labelLengthThreshold}
-            onLabelLengthThresholdChange={setLabelLengthThreshold}
-            drawPaths={drawPaths}
-            onDrawPathsChange={setDrawPaths}
-            hasPathsInGraph={
-              !!currentGraph?.paths && currentGraph.paths.length > 0
-            }
-            paths={currentGraph?.paths ?? []}
-            fallbackWarning={linearLayoutFallbackWarning}
-            hasLayoutResult={!!layoutResult}
-            isLargeGraph={isLargeGraph}
-            hasGeneTrack={geneTrackAnnotations.length > 0}
-            showGeneTrack={showGeneTrack}
-            onShowGeneTrackChange={setShowGeneTrack}
-          />
-        </div>
-
-        <div className="right-panel">
-          <div className="view-switch" role="tablist" aria-label="Main view">
-            <button
-              type="button"
-              className={rightPanelView === 'graph' ? 'active' : undefined}
-              onClick={() => setRightPanelView('graph')}
-              role="tab"
-              aria-selected={rightPanelView === 'graph'}
-            >
-              Graph Layout
-            </button>
-            <button
-              type="button"
-              className={
-                rightPanelView === 'annotations' ? 'active' : undefined
-              }
-              onClick={() => setRightPanelView('annotations')}
-              role="tab"
-              aria-selected={rightPanelView === 'annotations'}
-            >
-              Annotations
-            </button>
-            <button
-              type="button"
-              className={rightPanelView === 'styling' ? 'active' : undefined}
-              onClick={() => setRightPanelView('styling')}
-              role="tab"
-              aria-selected={rightPanelView === 'styling'}
-            >
-              Styling
-            </button>
+        {/* Everything that drives the graph lives in these tabs above it:
+            the query that extracts a subgraph, then how it's drawn. */}
+        <section className="visualization-section controls-section">
+          <div
+            className="view-switch"
+            role="tablist"
+            aria-label="Graph controls"
+          >
+            {CONTROL_TABS.map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                className={controlTab === tab.id ? 'active' : undefined}
+                onClick={() => setControlTab(tab.id)}
+                role="tab"
+                aria-selected={controlTab === tab.id}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          {/* All three panels stay mounted and are only shown/hidden via the
-              `hidden` attribute (plain CSS display:none, no JS needed),
-              rather than swapped in/out of the tree with a ternary. Graph
-              Layout in particular holds GraphCanvas, whose pan/zoom/rotation
-              and hover/selection state - plus the expensive per-path
-              traversal memo - live in its own component instance: unmounting
-              it (as the old conditional render did) threw all of that away
-              and forced a multi-second recompute every time the user came
-              back from the Styling or Annotations tab, resetting the view to
-              its initial fit-to-screen transform even though nothing about
-              the actual layout had changed. */}
-          <div
-            className="visualization-section"
-            hidden={rightPanelView !== 'annotations'}
-          >
-            <BedAnnotationPanel
-              annotations={bedAnnotations}
-              selectedAnnotation={selectedBedAnnotation}
-              onAnnotationsChange={handleBedAnnotationsChange}
-              onSelectAnnotation={handleSelectBedAnnotation}
+          {/* Tabs stay mounted and are only hidden, so e.g. the path list
+              keeps its search text and scroll position between visits. */}
+          <div hidden={controlTab !== 'query'}>
+            <GraphExtractionControls
+              graphs={graphSelectionOptions}
+              selectedGraphId={selectedIndexedGraph}
+              onSelectedGraphIdChange={setSelectedIndexedGraph}
+              supportsExtraction={selectedGraphSupportsExtraction}
+              selectedGraphIsLocal={selectedGraphIsLocal}
+              graphListError={indexedGraphError}
+              isLoadingGraphs={isLoadingIndexedGraphs}
+              nodeMaxNodes={subgraphMaxNodes}
+              onNodeMaxNodesChange={setSubgraphMaxNodes}
+              regionMaxNodes={regionMaxNodes}
+              onRegionMaxNodesChange={setRegionMaxNodes}
+              withCoords={extractionWithCoords}
+              onWithCoordsChange={setExtractionWithCoords}
+              nodeStart={subgraphStartNode}
+              onNodeStartChange={setSubgraphStartNode}
+              onExtractNode={handleExtractSubgraph}
+              regionPaths={regionPaths}
+              selectedRegionPathIndex={selectedRegionPathIndex}
+              onSelectedRegionPathIndexChange={handleSelectedRegionPathChange}
+              regionPathError={regionPathError}
+              isLoadingRegionPaths={isLoadingRegionPaths}
+              manualRegionReference={manualRegionReference}
+              onManualRegionReferenceChange={setManualRegionReference}
+              manualRegionSequence={manualRegionSequence}
+              onManualRegionSequenceChange={setManualRegionSequence}
+              regionStart={regionStart}
+              onRegionStartChange={setRegionStart}
+              regionEnd={regionEnd}
+              onRegionEndChange={setRegionEnd}
+              allHaplotypes={extractAllHaplotypes}
+              onAllHaplotypesChange={setExtractAllHaplotypes}
+              onExtractRegion={handleExtractRegion}
+              isExtracting={isExtractingSubgraph}
+              jobProgress={gfaidxJobProgress}
+              extractionError={loadError}
+              extractionDownloadUrl={oversizedResultUrl}
+              bedAnnotations={bedAnnotations}
+              selectedBedAnnotation={selectedBedAnnotation}
+              onBedAnnotationsChange={handleBedAnnotationsChange}
+              onSelectBedAnnotation={handleSelectBedAnnotation}
             />
           </div>
-          <div
-            className="visualization-section"
-            hidden={rightPanelView !== 'styling'}
-          >
+          <div hidden={controlTab !== 'display'}>
+            <DisplayControls
+              options={layoutOptions}
+              onChange={setLayoutOptions}
+              isComputing={isComputing}
+              zoom={displayZoom}
+              onZoomChange={handleControlZoomChange}
+              hasPathsInGraph={hasPathsInGraph}
+              paths={currentGraph?.paths ?? []}
+              colorScheme={colorScheme}
+              onColorSchemeChange={setColorScheme}
+              drawLabels={drawLabels}
+              onDrawLabelsChange={setDrawLabels}
+              hasGeneTrack={geneTrackAnnotations.length > 0}
+              showGeneTrack={showGeneTrack}
+              onShowGeneTrackChange={setShowGeneTrack}
+            />
+          </div>
+          <div hidden={controlTab !== 'paths'}>
+            <div className="settings-tab-content">
+              <div className="control-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={drawPaths}
+                    onChange={e => setDrawPaths(e.target.checked)}
+                    disabled={isComputing || !hasPathsInGraph}
+                  />{' '}
+                  List Paths{!hasPathsInGraph && ' (no paths present)'}
+                </label>
+                <div className="control-hint">
+                  Show the path list. Select paths there to draw overlays.
+                </div>
+              </div>
+            </div>
+            {drawPaths &&
+              currentGraph?.paths &&
+              currentGraph.paths.length > 0 && (
+                <PathsLegend
+                  paths={currentGraph.paths}
+                  isDarkMode={isDarkMode}
+                  selectedPathNames={visiblePathNames}
+                  onTogglePath={pathName =>
+                    setSelectedPathNames(currentSelected =>
+                      currentSelected.includes(pathName)
+                        ? currentSelected.filter(name => name !== pathName)
+                        : [...currentSelected, pathName],
+                    )
+                  }
+                  onSelectAll={() =>
+                    setSelectedPathNames(
+                      currentGraph.paths?.map(path => path.name) ?? [],
+                    )
+                  }
+                  onDeselectAll={() => setSelectedPathNames([])}
+                  filterToSelectedPaths={filterToSelectedPaths}
+                  onFilterToSelectedPathsChange={setFilterToSelectedPaths}
+                  onColorPathNodes={handleColorPathNodes}
+                  onClearNodeColors={handleClearPathNodeColors}
+                  copyNumberPathNames={copyNumberPathNames}
+                  onToggleCopyNumberPath={handleToggleCopyNumberPath}
+                  hasCopyNumberTrack={
+                    !!appliedLayoutOptions?.linearLayout &&
+                    !!appliedLayoutOptions?.referencePathName
+                  }
+                />
+              )}
+          </div>
+          <div hidden={controlTab !== 'advanced'}>
+            <AdvancedControls
+              options={layoutOptions}
+              onChange={setLayoutOptions}
+              isComputing={isComputing}
+              contigThickness={contigThickness}
+              onContigThicknessChange={setContigThickness}
+              connectorThickness={connectorThickness}
+              onConnectorThicknessChange={setConnectorThickness}
+              labelLengthThreshold={labelLengthThreshold}
+              onLabelLengthThresholdChange={setLabelLengthThreshold}
+            />
+          </div>
+          <div hidden={controlTab !== 'styling'}>
             <NodeStyleCsvPanel
               hasGraph={!!currentGraph}
               onLoadCsv={handleLoadNodeStyleCsv}
@@ -1635,176 +1717,166 @@ function App({ worker, onStopLayout }: AppProps) {
               geneTrackCount={geneTrackAnnotations.length}
             />
           </div>
-          <div
-            className="visualization-section"
-            hidden={rightPanelView !== 'graph'}
-          >
-              <div className="graph-layout-header">
-                <div className="graph-layout-title">
-                  <h3>Graph Layout</h3>
-                  {currentGraph?.sourceRecordCounts && (
-                    <div className="graph-layout-counts">
-                      <span>
-                        Number of Nodes:{' '}
-                        {currentGraph.sourceRecordCounts.segments.toLocaleString()}
-                      </span>
-                      <span>
-                        Number of Edges:{' '}
-                        {currentGraph.sourceRecordCounts.links.toLocaleString()}
-                      </span>
-                      <span>
-                        Paths/Walks:{' '}
-                        {(currentGraph.paths?.length ?? 0).toLocaleString()}
-                      </span>
-                    </div>
-                  )}
-                </div>
-                <form
-                  className="node-locator-form"
-                  onSubmit={event => {
-                    event.preventDefault()
-                    handleLocateNode()
-                  }}
-                >
-                  <input
-                    className="control-input node-locator-input"
-                    type="search"
-                    value={nodeLocatorInput}
-                    onChange={event => {
-                      setNodeLocatorInput(event.currentTarget.value)
-                      setNodeLocatorError(null)
-                    }}
-                    placeholder="Node ID"
-                    aria-label="Node ID to locate"
-                    disabled={isComputing || !layoutResult}
-                  />
-                  <button
-                    className="node-locator-button"
-                    type="submit"
-                    disabled={
-                      isComputing || !layoutResult || !nodeLocatorInput.trim()
-                    }
-                  >
-                    Go to Node
-                  </button>
-                </form>
-              </div>
-              {nodeLocatorError && (
-                <div className="node-locator-error" role="alert">
-                  {nodeLocatorError}
-                </div>
-              )}
-              {isComputing ? (
-                <div className="loading">
-                  <div className="spinner"></div>
-                  <p>Computing layout... ({formatElapsedSeconds(layoutElapsedMs)})</p>
-                  {layoutElapsedMs > 15000 && (
-                    <p className="loading-hint">
-                      Still working - large graphs, or Linear Layout with a
-                      reference path that only covers part of the graph, can
-                      take a while.
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    className="stop-layout-button"
-                    onClick={handleStopLayout}
-                  >
-                    Stop Layout
-                  </button>
-                </div>
-              ) : layoutResult ? (
-                <>
-                  <GraphCanvas
-                    layoutResult={layoutResult}
-                    graph={currentGraph}
-                    width={1200}
-                    height={800}
-                    isDarkMode={isDarkMode}
-                    colorScheme={colorScheme}
-                    zoom={zoom}
-                    zoomRequestId={zoomRequestId}
-                    onInternalZoomChange={handleCanvasZoomChange}
-                    focusNodeId={focusNodeId}
-                    focusNodeRequestId={focusNodeRequestId}
-                    contigThickness={contigThickness}
-                    connectorThickness={connectorThickness}
-                    drawLabels={drawLabels}
-                    labelLengthThreshold={labelLengthThreshold}
-                    drawPaths={drawPaths}
-                    linearLayout={appliedLayoutOptions?.linearLayout ?? false}
-                    referencePathName={
-                      appliedLayoutOptions?.referencePathName ?? ''
-                    }
-                    visiblePathIds={visiblePathNameSet}
-                    filterToSelectedPaths={filterToSelectedPaths}
-                    nodeColorOverrides={nodeColorOverrides}
-                    csvColorOverrides={csvColorOverrides}
-                    nodeLabelOverrides={csvLabelOverrides}
-                    nodeCsvMetadata={csvNodeMetadata}
-                    geneTrackAnnotations={showGeneTrack ? geneTrackAnnotations : []}
-                    copyNumberPathNames={copyNumberPathNames}
-                    onUseAsStartNode={setSubgraphStartNode}
-                  />
-                  {/* Keep path selection close to the rendered graph so long path
-                    names and search results are easier to scan. */}
-                  {drawPaths &&
-                    currentGraph?.paths &&
-                    currentGraph.paths.length > 0 && (
-                      <PathsLegend
-                        paths={currentGraph.paths}
-                        isDarkMode={isDarkMode}
-                        selectedPathNames={visiblePathNames}
-                        onTogglePath={pathName =>
-                          setSelectedPathNames(currentSelected =>
-                            currentSelected.includes(pathName)
-                              ? currentSelected.filter(name => name !== pathName)
-                              : [...currentSelected, pathName],
-                          )
-                        }
-                        onSelectAll={() =>
-                          setSelectedPathNames(
-                            currentGraph.paths?.map(path => path.name) ?? [],
-                          )
-                        }
-                        onDeselectAll={() => setSelectedPathNames([])}
-                        filterToSelectedPaths={filterToSelectedPaths}
-                        onFilterToSelectedPathsChange={setFilterToSelectedPaths}
-                        onColorPathNodes={handleColorPathNodes}
-                        onClearNodeColors={handleClearPathNodeColors}
-                        copyNumberPathNames={copyNumberPathNames}
-                        onToggleCopyNumberPath={handleToggleCopyNumberPath}
-                        hasCopyNumberTrack={
-                          !!appliedLayoutOptions?.linearLayout &&
-                          !!appliedLayoutOptions?.referencePathName
-                        }
-                      />
-                    )}
-                </>
-              ) : currentGraph ? (
-                <div className="placeholder">
-                  <div className="placeholder-content">
-                    <p>Click "Compute Layout" to visualize the graph</p>
-                    {isLargeGraph && (
-                      <p className="placeholder-warning">
-                        This graph has {graphNodeCount.toLocaleString()}{' '}
-                        nodes, more than the{' '}
-                        {LARGE_GRAPH_NODE_WARNING_THRESHOLD.toLocaleString()}{' '}
-                        layout tends to stay comfortable at. Laying it out
-                        may be slow or use a lot of memory - you can still
-                        try it, or use "Download Current Graph" above and
-                        process it with a desktop tool instead.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="placeholder">
-                  <p>Load a GFA file from the File menu to get started</p>
+        </section>
+
+        <section
+          className="visualization-section graph-section"
+          ref={graphSectionRef}
+        >
+          <div className="graph-layout-header">
+            <div className="graph-layout-title">
+              <h3>Graph Layout</h3>
+              <button
+                type="button"
+                className="compute-button graph-layout-compute-button"
+                onClick={computeLayout}
+                disabled={!currentGraph || isComputing}
+                title={
+                  isLargeGraph
+                    ? 'Large graph - layout may be slow or use a lot of memory.'
+                    : undefined
+                }
+              >
+                {isComputing
+                  ? layoutResult
+                    ? 'Redrawing...'
+                    : 'Computing Layout...'
+                  : layoutResult
+                    ? 'Redraw'
+                    : 'Compute Layout'}
+              </button>
+              {currentGraph?.sourceRecordCounts && (
+                <div className="graph-layout-counts">
+                  <span>
+                    Number of Nodes:{' '}
+                    {currentGraph.sourceRecordCounts.segments.toLocaleString()}
+                  </span>
+                  <span>
+                    Number of Edges:{' '}
+                    {currentGraph.sourceRecordCounts.links.toLocaleString()}
+                  </span>
+                  <span>
+                    Paths/Walks:{' '}
+                    {(currentGraph.paths?.length ?? 0).toLocaleString()}
+                  </span>
                 </div>
               )}
             </div>
+            <form
+              className="node-locator-form"
+              onSubmit={event => {
+                event.preventDefault()
+                handleLocateNode()
+              }}
+            >
+              <input
+                className="control-input node-locator-input"
+                type="search"
+                value={nodeLocatorInput}
+                onChange={event => {
+                  setNodeLocatorInput(event.currentTarget.value)
+                  setNodeLocatorError(null)
+                }}
+                placeholder="Node ID"
+                aria-label="Node ID to locate"
+                disabled={isComputing || !layoutResult}
+              />
+              <button
+                className="node-locator-button"
+                type="submit"
+                disabled={
+                  isComputing || !layoutResult || !nodeLocatorInput.trim()
+                }
+              >
+                Go to Node
+              </button>
+            </form>
           </div>
+          {nodeLocatorError && (
+            <div className="node-locator-error" role="alert">
+              {nodeLocatorError}
+            </div>
+          )}
+          {linearLayoutFallbackWarning && (
+            <div className="control-warning">{linearLayoutFallbackWarning}</div>
+          )}
+          {isComputing ? (
+            <div className="loading" style={{ height: canvasHeight }}>
+              <div className="spinner"></div>
+              <p>Computing layout... ({formatElapsedSeconds(layoutElapsedMs)})</p>
+              {layoutElapsedMs > 15000 && (
+                <p className="loading-hint">
+                  Still working - large graphs, or Linear Layout with a
+                  reference path that only covers part of the graph, can
+                  take a while.
+                </p>
+              )}
+              <button
+                type="button"
+                className="stop-layout-button"
+                onClick={handleStopLayout}
+              >
+                Stop Layout
+              </button>
+            </div>
+          ) : layoutResult ? (
+            <GraphCanvas
+              layoutResult={layoutResult}
+              graph={currentGraph}
+              width={canvasWidth}
+              height={canvasHeight}
+              isDarkMode={isDarkMode}
+              colorScheme={colorScheme}
+              zoom={zoom}
+              zoomRequestId={zoomRequestId}
+              onInternalZoomChange={handleCanvasZoomChange}
+              focusNodeId={focusNodeId}
+              focusNodeRequestId={focusNodeRequestId}
+              contigThickness={contigThickness}
+              connectorThickness={connectorThickness}
+              drawLabels={drawLabels}
+              labelLengthThreshold={labelLengthThreshold}
+              drawPaths={drawPaths}
+              linearLayout={appliedLayoutOptions?.linearLayout ?? false}
+              referencePathName={
+                appliedLayoutOptions?.referencePathName ?? ''
+              }
+              visiblePathIds={visiblePathNameSet}
+              filterToSelectedPaths={filterToSelectedPaths}
+              nodeColorOverrides={nodeColorOverrides}
+              csvColorOverrides={csvColorOverrides}
+              nodeLabelOverrides={csvLabelOverrides}
+              nodeCsvMetadata={csvNodeMetadata}
+              geneTrackAnnotations={showGeneTrack ? geneTrackAnnotations : []}
+              copyNumberPathNames={copyNumberPathNames}
+              onUseAsStartNode={setSubgraphStartNode}
+              infoPanelWidth={clampedInfoPanelWidth}
+              infoPanelMaxWidth={maxInfoPanelWidth}
+              onInfoPanelWidthChange={setInfoPanelWidth}
+            />
+          ) : currentGraph ? (
+            <div className="placeholder" style={{ height: canvasHeight }}>
+              <div className="placeholder-content">
+                <p>Press Compute Layout above to visualize the graph</p>
+                {isLargeGraph && (
+                  <p className="placeholder-warning">
+                    This graph has {graphNodeCount.toLocaleString()}{' '}
+                    nodes, more than the{' '}
+                    {LARGE_GRAPH_NODE_WARNING_THRESHOLD.toLocaleString()}{' '}
+                    layout tends to stay comfortable at. Laying it out
+                    may be slow or use a lot of memory - you can still
+                    try it, or use "Download Current Graph" above and
+                    process it with a desktop tool instead.
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="placeholder" style={{ height: canvasHeight }}>
+              <p>Load a GFA file from the File menu to get started</p>
+            </div>
+          )}
+        </section>
       </main>
 
       {/* Hidden file input */}

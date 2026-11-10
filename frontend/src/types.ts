@@ -142,16 +142,4 @@ export interface Transform {
   translateY: number
 }
 
-export interface ContextMenu {
-  visible: boolean
-  x: number
-  y: number
-  nodeId: string | null
-}
-
-export interface DetailsDialog {
-  visible: boolean
-  nodeId: string | null
-}
-
 export type ColorScheme = 'uniform' | 'random' | 'depth' | 'grey'
