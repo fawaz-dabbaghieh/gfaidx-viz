@@ -49,7 +49,7 @@ interface AppProps {
 }
 
 function getConfiguredBackendUrl(): string {
-  return import.meta.env.VITE_BACKEND_URL || 'https://search-dev.foldseek.com'
+  return import.meta.env.VITE_BACKEND_URL || 'https://search.foldseek.com'
 }
 
 // Hidden for now: the deployed site should just point at the shared backend
