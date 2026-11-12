@@ -10,6 +10,9 @@ interface DisplayControlsProps {
   zoom: number
   onZoomChange: (zoom: number) => void
   hasPathsInGraph: boolean
+  // False when node IDs aren't all integers: the layout engine can't order
+  // those, so Linear Layout then needs a reference path.
+  canOrderByNodeId: boolean
   paths: GraphPath[]
   colorScheme: ColorScheme
   onColorSchemeChange: (scheme: ColorScheme) => void
@@ -30,6 +33,7 @@ export function DisplayControls({
   onChange,
   isComputing,
   hasPathsInGraph,
+  canOrderByNodeId,
   paths,
   colorScheme,
   onColorSchemeChange,
@@ -62,6 +66,7 @@ export function DisplayControls({
   const selectedReferencePathIsVisible =
     options.referencePathName === '' ||
     filteredReferencePaths.some(path => path.name === options.referencePathName)
+  const linearLayoutUnavailable = !canOrderByNodeId && !hasPathsInGraph
 
   return (
     <div className="settings-tab-content">
@@ -131,13 +136,20 @@ export function DisplayControls({
               onChange={e =>
                 onChange({ ...options, linearLayout: e.target.checked })
               }
-              disabled={isComputing}
+              disabled={isComputing || linearLayoutUnavailable}
             />{' '}
-            Linear Layout
+            Linear Layout{linearLayoutUnavailable && ' (needs a path)'}
           </label>
           <div className="control-hint">
-            Use node-ID ordering, or straighten a selected reference path
-            after force-directed layout. Applies on the next Redraw.
+            {linearLayoutUnavailable
+              ? "Node IDs aren't numeric, so nodes can't be ordered by ID, " +
+                'and this graph has no path to straighten instead.'
+              : canOrderByNodeId
+                ? 'Use node-ID ordering, or straighten a selected reference ' +
+                  'path after force-directed layout.'
+                : 'Straighten a selected reference path after ' +
+                  'force-directed layout.'}{' '}
+            Applies on the next Redraw.
           </div>
         </div>
 
@@ -196,7 +208,13 @@ export function DisplayControls({
                 }
                 disabled={isComputing}
               >
-                <option value="">Node ID order</option>
+                {canOrderByNodeId ? (
+                  <option value="">Node ID order</option>
+                ) : (
+                  <option value="" disabled>
+                    Choose a reference path...
+                  </option>
+                )}
                 {!selectedReferencePathIsVisible && (
                   <option value={options.referencePathName} disabled>
                     {options.referencePathName} (hidden by search)
@@ -221,6 +239,8 @@ export function DisplayControls({
               </select>
               <div className="control-hint">
                 Keep the selected path horizontal in traversal order.
+                {!canOrderByNodeId &&
+                  " Node IDs aren't numeric, so a path is required."}
               </div>
               {repeatedReferencePathNames.size > 0 && (
                 <div className="control-error">

@@ -88,9 +88,6 @@ function formatElapsedSeconds(ms: number): string {
 }
 
 const LOCAL_GRAPH_ID_PREFIX = '__local_graph__:'
-// Bump this when the beta notice's wording changes meaningfully, so it
-// reappears once for users who already dismissed an older version.
-const BETA_BANNER_VERSION = '1'
 
 // Past this many nodes, force-directed layout (and especially linear layout
 // with a reference path - see runReferencePathRelax) can take long enough,
@@ -121,6 +118,10 @@ type ControlTab = (typeof CONTROL_TABS)[number]['id']
 // client-side instead of waiting on a round trip to learn the same limit.
 const GFAIDX_MAX_NODES = 1_000_000
 
+// The layout engine parses node IDs as C++ ints for Linear Layout's node-ID
+// order (see hasNumericNodeIds).
+const INT32_MAX = 2_147_483_647
+
 function App({ worker, onStopLayout }: AppProps) {
   const [layoutOptions, setLayoutOptions] = useState<LayoutOptions>({
     quality: 2,
@@ -140,6 +141,7 @@ function App({ worker, onStopLayout }: AppProps) {
   const [linearLayoutFallbackWarning, setLinearLayoutFallbackWarning] =
     useState<string | null>(null)
   const [layoutResult, setLayoutResult] = useState<LayoutResult | null>(null)
+  const [layoutError, setLayoutError] = useState<string | null>(null)
   // Snapshot of the options that actually produced layoutResult, distinct
   // from the live layoutOptions state: the coordinate ruler needs to know
   // what's really drawn, not what's pending in the controls until Redraw.
@@ -193,11 +195,6 @@ function App({ worker, onStopLayout }: AppProps) {
     const saved = localStorage.getItem('darkMode')
     return saved !== null ? JSON.parse(saved) : true
   })
-  // Bumping BETA_BANNER_VERSION makes the notice reappear even for users who
-  // already dismissed an older version of it.
-  const [betaBannerDismissed, setBetaBannerDismissed] = useState(
-    () => localStorage.getItem('betaBannerDismissed') === BETA_BANNER_VERSION,
-  )
   const [colorScheme, setColorScheme] = useState<ColorScheme>('uniform')
   const [zoom, setZoom] = useState<number>(1)
   const [zoomRequestId, setZoomRequestId] = useState(0)
@@ -653,12 +650,16 @@ function App({ worker, onStopLayout }: AppProps) {
         setColorScheme('uniform')
         setDrawLabels(false)
 
+        // rGFA region paths come back as one full PanSN sequence name with no
+        // reference (e.g. "GRCh38#0#chr1"), which is exactly the name of the
+        // path synthesized from the segments' SN/SO tags.
         const queriedPath = regionQuery
           ? graph.paths?.find(
               path =>
-                path.walk?.sequenceName === regionQuery.sequence &&
-                (!regionQuery.reference ||
-                  path.walk?.sampleName === regionQuery.reference),
+                path.name === regionQuery.sequence ||
+                (path.walk?.sequenceName === regionQuery.sequence &&
+                  (!regionQuery.reference ||
+                    path.walk?.sampleName === regionQuery.reference)),
             )
           : undefined
 
@@ -1197,21 +1198,45 @@ function App({ worker, onStopLayout }: AppProps) {
     setGeneTrackFileName(null)
   }, [])
 
+  // Linear Layout without a reference path orders nodes by ID, which the
+  // layout engine can only parse when every ID is a 32-bit integer - anything
+  // else (e.g. rGFA "s604921") aborts the WASM module instead of falling back.
+  const hasNumericNodeIds = useMemo(
+    () =>
+      (currentGraph?.nodes ?? []).every(
+        node => /^\d+$/.test(node.name) && Number(node.name) <= INT32_MAX,
+      ),
+    [currentGraph],
+  )
+
   const effectiveLayoutOptions = useMemo(() => {
-    if (!layoutOptions.linearLayout || !layoutOptions.referencePathName) {
-      return layoutOptions
+    let options = layoutOptions
+    if (options.linearLayout && options.referencePathName) {
+      const referencePath = currentGraph?.paths?.find(
+        path => path.name === options.referencePathName,
+      )
+      const hasRepeatedSegment =
+        referencePath && pathHasRepeatedSegments(referencePath.nodeIds)
+
+      if (!referencePath || hasRepeatedSegment) {
+        options = { ...options, referencePathName: '' }
+      }
     }
 
-    const referencePath = currentGraph?.paths?.find(
-      path => path.name === layoutOptions.referencePathName,
-    )
-    const hasRepeatedSegment =
-      referencePath && pathHasRepeatedSegments(referencePath.nodeIds)
+    // Without a usable reference path, a graph whose IDs can't be ordered
+    // gets the normal layout rather than crashing the layout engine.
+    if (
+      options.linearLayout &&
+      !options.referencePathName &&
+      !hasNumericNodeIds
+    ) {
+      options = { ...options, linearLayout: false }
+    }
 
-    return referencePath && !hasRepeatedSegment
-      ? layoutOptions
-      : { ...layoutOptions, referencePathName: '' }
-  }, [currentGraph?.paths, layoutOptions])
+    return options
+  }, [currentGraph?.paths, layoutOptions, hasNumericNodeIds])
+  const linearLayoutNeedsReferencePath =
+    layoutOptions.linearLayout && !effectiveLayoutOptions.linearLayout
 
   // Matches the "Number of Nodes" count shown above the graph window, so the
   // warning threshold means the same thing to the user in both places.
@@ -1281,6 +1306,7 @@ function App({ worker, onStopLayout }: AppProps) {
 
     const currentRequestId = ++requestIdRef.current
     setIsComputing(true)
+    setLayoutError(null)
     try {
       const { result, duration } = await worker.computeLayout(
         currentGraph,
@@ -1295,13 +1321,17 @@ function App({ worker, onStopLayout }: AppProps) {
     } catch (error) {
       if (currentRequestId === requestIdRef.current) {
         console.error('Layout computation failed:', error)
+        setLayoutError(error instanceof Error ? error.message : String(error))
+        // A WASM abort leaves the module unusable, so every later layout
+        // would fail too - start the next attempt on a fresh worker.
+        void onStopLayout()
       }
     } finally {
       if (currentRequestId === requestIdRef.current) {
         setIsComputing(false)
       }
     }
-  }, [worker, currentGraph, effectiveLayoutOptions])
+  }, [worker, currentGraph, effectiveLayoutOptions, onStopLayout])
 
   // A newly loaded graph starts with no layout at all (see computeLayout
   // above) - this just makes sure a *previous* graph's stale layout/result
@@ -1310,6 +1340,7 @@ function App({ worker, onStopLayout }: AppProps) {
   useEffect(() => {
     requestIdRef.current++
     setLayoutResult(null)
+    setLayoutError(null)
     setAppliedLayoutOptions(null)
     setIsComputing(false)
   }, [currentGraph])
@@ -1394,37 +1425,6 @@ function App({ worker, onStopLayout }: AppProps) {
 
   return (
     <div className={`app ${isDarkMode ? 'dark-mode' : ''}`}>
-      {!betaBannerDismissed && (
-        <div className="beta-banner" role="note">
-          <span>
-            <strong>Beta:</strong> this site is still in beta and only a
-            handful of graphs are preset for testing - more will be added to
-            the server over time. Subgraph extraction is currently slow
-            because graphs are served from a spinning-disk HDD; this will
-            move to NVMe storage soon, which should make extraction much
-            faster. Suggestions and issues are welcome on{' '}
-            <a
-              href="https://github.com/fawaz-dabbaghieh/graphviz_wasm/issues"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              GitHub
-            </a>
-            .
-          </span>
-          <button
-            type="button"
-            className="beta-banner-dismiss"
-            aria-label="Dismiss"
-            onClick={() => {
-              setBetaBannerDismissed(true)
-              localStorage.setItem('betaBannerDismissed', BETA_BANNER_VERSION)
-            }}
-          >
-            ×
-          </button>
-        </div>
-      )}
       <header className="app-header">
         <div className="header-top">
           <h1>gfaidx-viz</h1>
@@ -1632,6 +1632,7 @@ function App({ worker, onStopLayout }: AppProps) {
               zoom={displayZoom}
               onZoomChange={handleControlZoomChange}
               hasPathsInGraph={hasPathsInGraph}
+              canOrderByNodeId={hasNumericNodeIds}
               paths={currentGraph?.paths ?? []}
               colorScheme={colorScheme}
               onColorSchemeChange={setColorScheme}
@@ -1799,6 +1800,18 @@ function App({ worker, onStopLayout }: AppProps) {
           )}
           {linearLayoutFallbackWarning && (
             <div className="control-warning">{linearLayoutFallbackWarning}</div>
+          )}
+          {linearLayoutNeedsReferencePath && (
+            <div className="control-warning">
+              This graph's node IDs aren't numeric, so Linear Layout needs a
+              reference path - choose one in the Display tab. Until then the
+              normal layout is used.
+            </div>
+          )}
+          {layoutError && (
+            <div className="layout-error" role="alert">
+              {layoutError}
+            </div>
           )}
           {isComputing ? (
             <div className="loading" style={{ height: canvasHeight }}>

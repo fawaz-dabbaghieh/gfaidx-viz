@@ -146,8 +146,13 @@ export function convertGFAToGraph(
       (gfaNode.tags.KC as number) ||
       1.0
 
-    // Create positive strand node only if it's used in edges
-    if (usedStrands.has(`${gfaNode.id}+`)) {
+    // Create positive strand node only if it's used in edges, or if neither
+    // strand is - a segment with no links or paths (e.g. a one-node region
+    // query) would otherwise vanish from the graph entirely.
+    if (
+      usedStrands.has(`${gfaNode.id}+`) ||
+      !usedStrands.has(`${gfaNode.id}-`)
+    ) {
       nodes.push({
         id: `${gfaNode.id}+`,
         name: gfaNode.id,
