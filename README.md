@@ -21,6 +21,8 @@ Pick one of the indexed graphs hosted on the server, then extract a subgraph:
 - **Coordinate region**: a range on a reference path, e.g.
   `CHM13 chr1:1,000,000-1,010,000`. Optionally include all haplotypes that
   pass through it.
+- **Find a gene**: type a gene name, e.g. `BRCA1`, to fill in its GRCh38 or
+  CHM13 region plus a flank.
 - **Node neighborhood**: the nodes around a starting node, up to a size limit.
 - **From a BED file**: load a BED/TSV of regions and pick one to fill in the
   coordinates.
@@ -34,6 +36,14 @@ browser, with a coordinate ruler underneath. After a region query, the queried
 path is used automatically. rGFA graphs (such as minigraph graphs) have no
 explicit paths, so the app builds the reference path from the segments'
 `SN`/`SO`/`SR` tags.
+
+On a GRCh38 or CHM13 reference, protein-coding genes are drawn above the ruler
+automatically, with exons, UTRs and strand. This uses the
+[MANE Select](https://www.ncbi.nlm.nih.gov/refseq/MANE/) transcript of each
+gene, shipped with the app. On CHM13 it also shows the extra copies of genes
+that CHM13 has more of than GRCh38, such as AMY1. It needs reference
+coordinates in the graph, which the minigraph and Minigraph-Cactus graphs
+provide through their rGFA tags.
 
 ![Linear layout with the coordinate ruler](docs/images/linear-layout.png)
 
@@ -69,8 +79,8 @@ edge to widen it for long path names.
 
 - **Node styling**: load a CSV/TSV of node colors and labels
   (BandageNG-style).
-- **Gene track**: load a BED file of genes to draw them above the coordinate
-  ruler.
+- **Gene track**: load your own BED file (BED12 adds exons) to replace the
+  built-in genes above the coordinate ruler.
 
 ![Nodes colored from a CSV and a gene track](docs/images/styling.png)
 

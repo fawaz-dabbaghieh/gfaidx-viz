@@ -193,7 +193,7 @@ export function NodeStyleCsvPanel({
           <div className="annotation-summary">
             {geneTrackFileName
               ? `${geneTrackFileName} - ${geneTrackCount.toLocaleString()} genes loaded`
-              : 'Load a BED file (chrom, start, end, name, score, strand).'}
+              : 'Load a BED file (chrom, start, end, name, score, strand; BED12 adds exons).'}
           </div>
         </div>
         <button
@@ -217,7 +217,8 @@ export function NodeStyleCsvPanel({
 
       <div className="control-hint">
         Shown above the ruler only with Linear Layout and a reference path
-        selected, and only for genes on that reference's sequence.
+        selected, and only for genes on that reference's sequence. Replaces
+        the built-in GRCh38/CHM13 genes until cleared or a new graph loads.
       </div>
 
       {geneTrackFileName && (

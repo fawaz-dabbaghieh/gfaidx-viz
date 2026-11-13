@@ -21,6 +21,11 @@ import {
 } from './utils/displayGraph'
 import { parseNodeStyleCsv, applyNodeStyleCsv } from './utils/nodeStyleCsv'
 import { parseGeneTrackBed, type GeneRecord } from './utils/geneTrackBed'
+import {
+  BUILT_IN_GENE_SOURCE,
+  builtInGeneSetForPath,
+  loadBuiltInGenes,
+} from './utils/builtInGenes'
 import { clampZoom } from './utils/zoom'
 import {
   GfaidxResultTooLargeError,
@@ -254,6 +259,9 @@ function App({ worker, onStopLayout }: AppProps) {
     null,
   )
   const [showGeneTrack, setShowGeneTrack] = useState(true)
+  // The shipped genes for the drawn reference's chromosome (see
+  // builtInGeneSet below); unused while a user BED is loaded.
+  const [builtInGenes, setBuiltInGenes] = useState<GeneRecord[]>([])
   const [indexedGraphs, setIndexedGraphs] = useState<IndexedGraph[]>([])
   const [selectedIndexedGraph, setSelectedIndexedGraph] = useState('')
   const [localGraphOption, setLocalGraphOption] =
@@ -532,6 +540,22 @@ function App({ worker, onStopLayout }: AppProps) {
         setRegionStart(String(regionPath.start))
         setRegionEnd(String(defaultEnd))
       }
+    },
+    [regionPaths],
+  )
+
+  // Gene search picked a gene: select its coordinate track and fill in the
+  // flanked region, leaving the user to run the query.
+  const handleSelectGeneRegion = useCallback(
+    (regionPathIndex: number, start: number, end: number) => {
+      const regionPath = regionPaths[regionPathIndex]
+      if (!regionPath) return
+      setSelectedRegionPathIndex(regionPathIndex)
+      setManualRegionReference(regionPath.reference)
+      setManualRegionSequence(regionPath.sequence)
+      setRegionStart(String(start))
+      setRegionEnd(String(end))
+      setLoadError(null)
     },
     [regionPaths],
   )
@@ -1051,25 +1075,11 @@ function App({ worker, onStopLayout }: AppProps) {
         : { ...currentOptions, referencePathName: '' }
     })
 
-    if (!currentGraph?.paths) {
-      setSelectedPathNames([])
-      setCopyNumberPathNames([])
-      setNodeColorOverrides({})
-      return
-    }
-
-    const availablePathNames = new Set(currentGraph.paths.map(path => path.name))
-    setSelectedPathNames(currentSelected =>
-      currentSelected.filter(pathName => availablePathNames.has(pathName)),
-    )
-    // Same reasoning as selectedPathNames above: a toggled-on copy-number
-    // path name from a previous graph almost never matches a name in a new
-    // one, so filtering by availability and blind-clearing come to nearly
-    // the same result - filtering is just the one consistent pattern that's
-    // also correct for the edge case of reloading the same graph.
-    setCopyNumberPathNames(current =>
-      current.filter(pathName => availablePathNames.has(pathName)),
-    )
+    // A new graph starts with no paths ticked, even when it has paths of the
+    // same names as the last one (e.g. CHM13 in two queries of one graph):
+    // carrying a selection over would highlight paths nobody chose here.
+    setSelectedPathNames([])
+    setCopyNumberPathNames([])
     setNodeColorOverrides({})
   }, [currentGraph])
 
@@ -1197,6 +1207,53 @@ function App({ worker, onStopLayout }: AppProps) {
     setGeneTrackAnnotations([])
     setGeneTrackFileName(null)
   }, [])
+
+  // Built-in genes for the drawn linear layout's reference path, when it's a
+  // GRCh38 or CHM13 chromosome with real coordinates. Based on the applied
+  // layout (what's on screen), and only one chromosome file is fetched.
+  const builtInGeneSet = useMemo(() => {
+    if (
+      geneTrackFileName ||
+      !currentGraph ||
+      !appliedLayoutOptions?.linearLayout ||
+      !appliedLayoutOptions.referencePathName
+    ) {
+      return null
+    }
+    return builtInGeneSetForPath(
+      currentGraph,
+      appliedLayoutOptions.referencePathName,
+    )
+  }, [appliedLayoutOptions, currentGraph, geneTrackFileName])
+  const builtInGeneAssembly = builtInGeneSet?.assembly ?? null
+  const builtInGeneChrom = builtInGeneSet?.chrom ?? null
+
+  useEffect(() => {
+    if (!builtInGeneAssembly || !builtInGeneChrom) {
+      setBuiltInGenes([])
+      return
+    }
+
+    let cancelled = false
+    loadBuiltInGenes(builtInGeneAssembly, builtInGeneChrom)
+      .then(genes => {
+        if (!cancelled) setBuiltInGenes(genes)
+      })
+      .catch(error => {
+        console.warn('Failed to load built-in genes:', error)
+        if (!cancelled) setBuiltInGenes([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [builtInGeneAssembly, builtInGeneChrom])
+
+  const activeGeneTrack = geneTrackFileName ? geneTrackAnnotations : builtInGenes
+  const geneTrackSource = geneTrackFileName
+    ? geneTrackFileName
+    : builtInGeneAssembly
+      ? `${BUILT_IN_GENE_SOURCE}, ${builtInGeneAssembly}`
+      : null
 
   // Linear Layout without a reference path orders nodes by ID, which the
   // layout engine can only parse when every ID is a 32-bit integer - anything
@@ -1622,6 +1679,7 @@ function App({ worker, onStopLayout }: AppProps) {
               selectedBedAnnotation={selectedBedAnnotation}
               onBedAnnotationsChange={handleBedAnnotationsChange}
               onSelectBedAnnotation={handleSelectBedAnnotation}
+              onSelectGeneRegion={handleSelectGeneRegion}
             />
           </div>
           <div hidden={controlTab !== 'display'}>
@@ -1638,7 +1696,8 @@ function App({ worker, onStopLayout }: AppProps) {
               onColorSchemeChange={setColorScheme}
               drawLabels={drawLabels}
               onDrawLabelsChange={setDrawLabels}
-              hasGeneTrack={geneTrackAnnotations.length > 0}
+              hasGeneTrack={activeGeneTrack.length > 0}
+              geneTrackSource={geneTrackSource}
               showGeneTrack={showGeneTrack}
               onShowGeneTrackChange={setShowGeneTrack}
             />
@@ -1860,7 +1919,7 @@ function App({ worker, onStopLayout }: AppProps) {
               csvColorOverrides={csvColorOverrides}
               nodeLabelOverrides={csvLabelOverrides}
               nodeCsvMetadata={csvNodeMetadata}
-              geneTrackAnnotations={showGeneTrack ? geneTrackAnnotations : []}
+              geneTrackAnnotations={showGeneTrack ? activeGeneTrack : []}
               copyNumberPathNames={copyNumberPathNames}
               onUseAsStartNode={setSubgraphStartNode}
               infoPanelWidth={clampedInfoPanelWidth}

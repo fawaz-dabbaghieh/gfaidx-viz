@@ -18,9 +18,11 @@ interface DisplayControlsProps {
   onColorSchemeChange: (scheme: ColorScheme) => void
   drawLabels: boolean
   onDrawLabelsChange: (draw: boolean) => void
-  // Feature B: gene track toggle. Disabled (not hidden) when no BED is
-  // loaded yet, so the control is discoverable before the user has one.
+  // Feature B: gene track toggle. Disabled (not hidden) when there are no
+  // genes for the drawn reference, so the control is still discoverable.
   hasGeneTrack: boolean
+  // Where the genes come from (the user's BED file or the built-in set).
+  geneTrackSource: string | null
   showGeneTrack: boolean
   onShowGeneTrackChange: (show: boolean) => void
 }
@@ -40,6 +42,7 @@ export function DisplayControls({
   drawLabels,
   onDrawLabelsChange,
   hasGeneTrack,
+  geneTrackSource,
   showGeneTrack,
   onShowGeneTrackChange,
 }: DisplayControlsProps) {
@@ -120,11 +123,14 @@ export function DisplayControls({
               onChange={e => onShowGeneTrackChange(e.target.checked)}
               disabled={isComputing || !hasGeneTrack}
             />{' '}
-            Show Gene Track{!hasGeneTrack && ' (no BED loaded)'}
+            Show Gene Track{!hasGeneTrack && ' (no genes for this view)'}
           </label>
           <div className="control-hint">
-            Draw genes above the ruler. Load a BED file from the Styling tab,
-            and select a reference path with Linear Layout.
+            {hasGeneTrack && geneTrackSource
+              ? `Genes from ${geneTrackSource}. `
+              : 'Genes are added automatically when a GRCh38 or CHM13 ' +
+                'path is drawn with Linear Layout. '}
+            Load your own BED in the Styling tab to replace them.
           </div>
         </div>
 

@@ -11,11 +11,43 @@ export interface GeneRecord {
   score: string
   strand: '+' | '-' | null
   lineNumber: number
+  // BED12 columns 7-12, when present: the coding span and the exons, in
+  // absolute coordinates. Rows with fewer columns are drawn as a plain box.
+  thickStart?: number
+  thickEnd?: number
+  exons?: { start: number; end: number }[]
+  // Anything after column 12 (the built-in genes keep the RefSeq and Ensembl
+  // transcript IDs there), shown in the tooltip.
+  extraColumns?: string[]
 }
 
 function parseStrand(value: string | undefined): '+' | '-' | null {
   if (value === '+' || value === '-') return value
   return null
+}
+
+// Malformed block columns are ignored rather than rejected, so the row still
+// draws as a box.
+function parseExons(
+  fields: string[],
+  start: number,
+): { start: number; end: number }[] | undefined {
+  const blockCount = Number(fields[9])
+  if (!Number.isInteger(blockCount) || blockCount < 1) return undefined
+  const sizes = fields[10]!.split(',').filter(Boolean).map(Number)
+  const offsets = fields[11]!.split(',').filter(Boolean).map(Number)
+  if (sizes.length !== blockCount || offsets.length !== blockCount) {
+    return undefined
+  }
+
+  const exons: { start: number; end: number }[] = []
+  for (let i = 0; i < blockCount; i++) {
+    const size = sizes[i]!
+    const offset = offsets[i]!
+    if (!Number.isFinite(size) || !Number.isFinite(offset)) return undefined
+    exons.push({ start: start + offset, end: start + offset + size })
+  }
+  return exons
 }
 
 export function parseGeneTrackBed(text: string): GeneRecord[] {
@@ -46,7 +78,7 @@ export function parseGeneTrackBed(text: string): GeneRecord[] {
       )
     }
 
-    genes.push({
+    const gene: GeneRecord = {
       chrom,
       start,
       end,
@@ -54,7 +86,20 @@ export function parseGeneTrackBed(text: string): GeneRecord[] {
       score: fields[4]?.trim() ?? '0',
       strand: parseStrand(fields[5]?.trim()),
       lineNumber,
-    })
+    }
+    if (fields.length >= 12) {
+      const thickStart = Number(fields[6])
+      const thickEnd = Number(fields[7])
+      if (Number.isFinite(thickStart) && Number.isFinite(thickEnd)) {
+        gene.thickStart = thickStart
+        gene.thickEnd = thickEnd
+      }
+      gene.exons = parseExons(fields, start)
+      if (fields.length > 12) {
+        gene.extraColumns = fields.slice(12).map(field => field.trim())
+      }
+    }
+    genes.push(gene)
   })
 
   if (genes.length === 0) {

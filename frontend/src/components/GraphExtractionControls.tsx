@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { GfaidxJobProgress } from '../api/gfaidx'
 import type { BedAnnotation, IndexedGraph, RegionPath } from '../types'
 import { BedAnnotationPanel } from './BedAnnotationPanel'
+import { GeneSearch } from './GeneSearch'
 import { HelpIcon } from './HelpIcon'
 
 // 'bed' isn't a query of its own: picking an annotation fills in the
@@ -53,6 +54,7 @@ interface GraphExtractionControlsProps {
   selectedBedAnnotation: BedAnnotation | null
   onBedAnnotationsChange: (annotations: BedAnnotation[]) => void
   onSelectBedAnnotation: (annotation: BedAnnotation, flankBp: number) => void
+  onSelectGeneRegion: (regionPathIndex: number, start: number, end: number) => void
 }
 
 function formatElapsedSeconds(ms: number): string {
@@ -122,6 +124,7 @@ export function GraphExtractionControls({
   selectedBedAnnotation,
   onBedAnnotationsChange,
   onSelectBedAnnotation,
+  onSelectGeneRegion,
 }: GraphExtractionControlsProps) {
   // The backend queue/gfaidx/download phases can each individually sit still
   // for a while - an elapsed-time readout at least confirms the request is
@@ -450,6 +453,19 @@ export function GraphExtractionControls({
                     Maximum number of nodes returned by BFS.
                   </div>
                 </div>
+              )}
+              {regionPaths.length > 0 && (
+                <GeneSearch
+                  regionPaths={regionPaths}
+                  selectedRegionPathIndex={selectedRegionPathIndex}
+                  graphName={selectedGraphId}
+                  disabled={controlsDisabled || isLoadingRegionPaths}
+                  onSelectRegion={(regionPathIndex, start, end) => {
+                    // The chosen track must not be hidden by the track filter.
+                    setCoordinateTrackQuery('')
+                    onSelectGeneRegion(regionPathIndex, start, end)
+                  }}
+                />
               )}
               <div className="control-group">
                 <label htmlFor="region-path-search">

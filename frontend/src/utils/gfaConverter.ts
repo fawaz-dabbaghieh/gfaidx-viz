@@ -27,7 +27,10 @@ function parseCigarOverlap(cigar: string): number {
 
 // Splits a PanSN-style "sample#haplotype#sequence" name into its parts,
 // matching the convention W-lines already use, so rGFA-derived paths display
-// the same way. Falls back to putting the whole name in sequenceName.
+// the same way. Also takes the two-part "sample#sequence" form some
+// minigraph-cactus graphs use (e.g. "GRCh38#chr17"), so the path still
+// matches a region query for that sample and sequence. Falls back to putting
+// the whole name in sequenceName.
 function parsePanSNName(name: string): {
   sampleName: string
   haplotypeIndex: string
@@ -40,6 +43,9 @@ function parsePanSNName(name: string): {
       haplotypeIndex: parts[1]!,
       sequenceName: parts[2]!,
     }
+  }
+  if (parts.length === 2) {
+    return { sampleName: parts[0]!, haplotypeIndex: '', sequenceName: parts[1]! }
   }
   return { sampleName: '', haplotypeIndex: '', sequenceName: name }
 }
@@ -209,6 +215,19 @@ export function convertGFAToGraph(
 
   // Process paths
   const paths: GraphPath[] = []
+  // Paths are listed, selected, and drawn by name, so names must be unique
+  // (a repeat breaks the path list's rows and makes one tick select both).
+  // The parser already numbers repeated W-lines; this also covers repeated
+  // P-line names and a P-line named like a W-line.
+  const usedPathNames = new Set<string>()
+  const uniquePathName = (name: string): string => {
+    let uniqueName = name
+    for (let copy = 2; usedPathNames.has(uniqueName); copy++) {
+      uniqueName = `${name} [${copy}]`
+    }
+    usedPathNames.add(uniqueName)
+    return uniqueName
+  }
 
   for (const gfaPath of gfaGraph.paths) {
     // Parse path string (format: node1+,node2-,node3+,...)
@@ -222,7 +241,7 @@ export function convertGFAToGraph(
     }
 
     paths.push({
-      name: gfaPath.name,
+      name: uniquePathName(gfaPath.name),
       nodeIds,
       recordType: gfaPath.recordType,
       walk: gfaPath.walk,
@@ -231,12 +250,17 @@ export function convertGFAToGraph(
 
   // minigraph-style rGFA graphs have no P/W lines at all; synthesize the
   // reference path(s) from segment SN/SO/SR tags instead so linear layout
-  // and the coordinate ruler still have a path to work with.
+  // and the coordinate ruler still have a path to work with. Skipped when
+  // the GFA already has a path by that name, e.g. the CHM13 W-line that
+  // gfaidx writes with coordinates ("CHM13#0#chr17") for a "With
+  // Coordinates" query: the real walk wins over the reconstruction.
   const existingNodeIds = new Set(nodes.map(node => node.id))
   for (const rgfaPath of synthesizeRGFAReferencePaths(
     gfaGraph.nodes,
     existingNodeIds,
   )) {
+    if (usedPathNames.has(rgfaPath.name)) continue
+    usedPathNames.add(rgfaPath.name)
     rgfaPath.nodeIds = rgfaPath.nodeIds.map(internNodeId)
     paths.push(rgfaPath)
   }

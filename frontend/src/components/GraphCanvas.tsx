@@ -47,8 +47,13 @@ interface PathCoordinateBreakpoint {
 // overlapping genes at one screen position, the extras collapse into a
 // "+N more" indicator rather than the reserved band growing without bound.
 const MAX_GENE_TRACK_LANES = 3
-const GENE_LANE_HEIGHT = 16
+// Each lane is a row for gene names above the row the genes are drawn in.
+const GENE_LABEL_HEIGHT = 11
+const GENE_GLYPH_HEIGHT = 12
+const GENE_LANE_HEIGHT = GENE_LABEL_HEIGHT + GENE_GLYPH_HEIGHT
 const GENE_LANE_GAP = 3
+// Spacing of the strand chevrons drawn along a gene's intron line.
+const GENE_CHEVRON_SPACING = 40
 
 // One backbone (reference/linear-layout path) node's position in the ruler's
 // bp coordinate system, plus its bare segment name - the join key used to
@@ -109,6 +114,10 @@ function worldXToBp(
 // start shares the same bp (nothing was added to cumulativeBp between them)
 // while still covering a real worldX range - a query bp landing exactly on
 // that shared value must resolve to a worldX, not divide by zero.
+//
+// Called for every exon edge on every frame, so the pair is found by binary
+// search (bp never decreases along the breakpoints) rather than a scan: the
+// first b with b.bp >= bp is the same pair the linear scan would stop at.
 function bpToWorldX(
   breakpoints: PathCoordinateBreakpoint[],
   bp: number,
@@ -117,16 +126,18 @@ function bpToWorldX(
   const last = breakpoints[breakpoints.length - 1]!
   if (bp < first.bp || bp > last.bp) return null
 
-  for (let i = 0; i + 1 < breakpoints.length; i++) {
-    const a = breakpoints[i]!
-    const b = breakpoints[i + 1]!
-    if (bp >= a.bp && bp <= b.bp) {
-      if (b.bp === a.bp) return a.worldX
-      const t = (bp - a.bp) / (b.bp - a.bp)
-      return a.worldX + t * (b.worldX - a.worldX)
-    }
+  let low = 1
+  let high = breakpoints.length - 1
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (breakpoints[middle]!.bp >= bp) high = middle
+    else low = middle + 1
   }
-  return last.worldX
+  const a = breakpoints[low - 1]!
+  const b = breakpoints[low]!
+  if (b.bp === a.bp) return a.worldX
+  const t = (bp - a.bp) / (b.bp - a.bp)
+  return a.worldX + t * (b.worldX - a.worldX)
 }
 
 export interface CopyNumberTrackData {
@@ -467,6 +478,16 @@ function GraphCanvasComponent({
         segMaxX = Math.max(segMaxX, segment.x)
       }
 
+      // A path built from rGFA tags (see gfaConverter) is named after its
+      // segments' SN, and each segment's SO is its true offset. Using it
+      // keeps the coordinates right past segments the subgraph left out
+      // (e.g. a BFS query capped by Max Nodes), where summing lengths would
+      // shift everything after the gap.
+      const rgfaOffset = node.tags?.SO
+      if (typeof rgfaOffset === 'number' && node.tags?.SN === path.name) {
+        cumulativeBp = rgfaOffset
+      }
+
       const bpStart = cumulativeBp
       breakpoints.push({ worldX: segMinX, bp: cumulativeBp })
       cumulativeBp += node.length
@@ -501,13 +522,21 @@ function GraphCanvasComponent({
       return null
     }
 
-    const sequenceName = referencePathCoordinates.sequenceName
+    const { sequenceName, breakpoints } = referencePathCoordinates
     if (!sequenceName) return null
     const targetSequenceName = stripPanSNPrefix(sequenceName)
+    // Only genes overlapping the drawn stretch of the reference: a whole
+    // chromosome's genes would otherwise fill the lanes from off-screen and
+    // inflate the "+N more" count.
+    const firstBp = breakpoints[0]!.bp
+    const lastBp = breakpoints[breakpoints.length - 1]!.bp
 
     const matchingGenes = geneTrackAnnotations
       .filter(
-        gene => stripPanSNPrefix(gene.chrom) === targetSequenceName,
+        gene =>
+          gene.end > firstBp &&
+          gene.start < lastBp &&
+          stripPanSNPrefix(gene.chrom) === targetSequenceName,
       )
       .sort((a, b) => a.start - b.start)
 
@@ -2007,13 +2036,47 @@ function GraphCanvasComponent({
           geneHitRectsRef.current = []
           geneTrackBandRef.current = { top: geneTrackTop, bottom: geneTrackBottom }
 
-          for (const { gene, lane } of geneTrackLanes.genes) {
-            const startX = bpToWorldX(breakpoints, gene.start)
-            const endX = bpToWorldX(breakpoints, gene.end)
-            if (startX === null || endX === null) continue
+          // Genes running past either end of the drawn reference are cut off
+          // at that end rather than skipped, so bp is clamped into range
+          // (which also means bpToWorldX never returns null here).
+          const firstBp = breakpoints[0]!.bp
+          const lastBp = breakpoints[breakpoints.length - 1]!.bp
+          const bpToScreenX = (bp: number) =>
+            transformPoint(
+              bpToWorldX(breakpoints, Math.min(Math.max(bp, firstBp), lastBp)) ?? 0,
+              0,
+            ).x
+          // Adds one exon piece to the current path; off-screen pieces are
+          // skipped so a long gene doesn't cost a rect per hidden exon.
+          const addExonRect = (
+            startBp: number,
+            endBp: number,
+            centreY: number,
+            rectHeight: number,
+          ) => {
+            if (endBp <= startBp || endBp <= firstBp || startBp >= lastBp) return
+            const x1 = bpToScreenX(startBp)
+            const x2 = bpToScreenX(endBp)
+            const rectLeft = Math.min(x1, x2)
+            const rectRight = Math.max(x1, x2)
+            if (rectRight < 0 || rectLeft > width) return
+            ctx.rect(
+              rectLeft,
+              centreY - rectHeight / 2,
+              Math.max(rectRight - rectLeft, 1),
+              rectHeight,
+            )
+          }
+          const labelRightByLane: number[] = new Array(
+            geneTrackLanes.laneCount,
+          ).fill(-Infinity)
+          ctx.font = '10px monospace'
+          ctx.textAlign = 'left'
+          ctx.textBaseline = 'middle'
 
-            const screenStart = transformPoint(startX, 0).x
-            const screenEnd = transformPoint(endX, 0).x
+          for (const { gene, lane } of geneTrackLanes.genes) {
+            const screenStart = bpToScreenX(gene.start)
+            const screenEnd = bpToScreenX(gene.end)
             const left = Math.min(screenStart, screenEnd)
             const right = Math.max(screenStart, screenEnd)
             // Clip to the visible canvas, same as tick labels below, so an
@@ -2022,71 +2085,136 @@ function GraphCanvasComponent({
             if (right < -clipMargin || left > width + clipMargin) continue
 
             // Lane 0 sits closest to the ruler baseline.
-            const boxTop =
+            const laneTop =
               geneTrackBottom -
               (lane + 1) * GENE_LANE_HEIGHT -
               lane * GENE_LANE_GAP
+            const glyphTop = laneTop + GENE_LABEL_HEIGHT
+            const glyphMiddle = glyphTop + GENE_GLYPH_HEIGHT / 2
             const boxWidth = Math.max(right - left, 1)
             const isHoveredGene = hoveredGene?.gene === gene
-
-            ctx.fillStyle = isHoveredGene
+            const geneColor = isHoveredGene
               ? '#f0a500'
               : gene.strand === '-'
                 ? '#c2554d'
                 : '#3f7fbf'
-            ctx.beginPath()
-            if (typeof ctx.roundRect === 'function') {
-              ctx.roundRect(left, boxTop, boxWidth, GENE_LANE_HEIGHT, 3)
+            ctx.fillStyle = geneColor
+
+            if (gene.exons && boxWidth >= 6) {
+              // Genome-browser style: a thin intron line with strand
+              // chevrons, then exons on top - coding parts (thickStart to
+              // thickEnd) full height, UTRs half height.
+              ctx.fillRect(left, glyphMiddle - 0.5, boxWidth, 1)
+
+              if (gene.strand) {
+                // Chevrons point the way the gene reads on screen, which a
+                // rotated view can flip.
+                const direction =
+                  (gene.strand === '+') === (screenEnd >= screenStart) ? 1 : -1
+                // Anchored to the gene's own start, so they don't crawl
+                // while panning.
+                let chevronX = left + GENE_CHEVRON_SPACING / 2
+                if (chevronX < 0) {
+                  chevronX +=
+                    Math.ceil(-chevronX / GENE_CHEVRON_SPACING) *
+                    GENE_CHEVRON_SPACING
+                }
+                ctx.strokeStyle = geneColor
+                ctx.lineWidth = 1
+                ctx.beginPath()
+                for (
+                  ;
+                  chevronX < Math.min(right, width);
+                  chevronX += GENE_CHEVRON_SPACING
+                ) {
+                  ctx.moveTo(chevronX - 3 * direction, glyphMiddle - 3)
+                  ctx.lineTo(chevronX, glyphMiddle)
+                  ctx.lineTo(chevronX - 3 * direction, glyphMiddle + 3)
+                }
+                ctx.stroke()
+              }
+
+              const thickStart = gene.thickStart ?? gene.start
+              const thickEnd = gene.thickEnd ?? gene.end
+              const utrHeight = GENE_GLYPH_HEIGHT / 2
+              ctx.beginPath()
+              for (const exon of gene.exons) {
+                addExonRect(
+                  exon.start,
+                  Math.min(exon.end, thickStart),
+                  glyphMiddle,
+                  utrHeight,
+                )
+                addExonRect(
+                  Math.max(exon.start, thickStart),
+                  Math.min(exon.end, thickEnd),
+                  glyphMiddle,
+                  GENE_GLYPH_HEIGHT,
+                )
+                addExonRect(
+                  Math.max(exon.start, thickEnd),
+                  exon.end,
+                  glyphMiddle,
+                  utrHeight,
+                )
+              }
+              ctx.fill()
             } else {
-              ctx.rect(left, boxTop, boxWidth, GENE_LANE_HEIGHT)
+              ctx.beginPath()
+              if (typeof ctx.roundRect === 'function') {
+                ctx.roundRect(left, glyphTop, boxWidth, GENE_GLYPH_HEIGHT, 3)
+              } else {
+                ctx.rect(left, glyphTop, boxWidth, GENE_GLYPH_HEIGHT)
+              }
+              ctx.fill()
+
+              // Below ~12px there's no room for a legible arrowhead; below
+              // ~3px the box itself collapses to a bare tick so it doesn't
+              // disappear into sub-pixel rounding.
+              if (boxWidth < 3) {
+                ctx.fillRect(left, glyphTop, 1, GENE_GLYPH_HEIGHT)
+              } else if (gene.strand && boxWidth >= 12) {
+                const arrowSize = 4
+                const arrowX = gene.strand === '+' ? right - 3 : left + 3
+                const direction = gene.strand === '+' ? 1 : -1
+                ctx.fillStyle = isDarkMode ? '#1a1a1a' : '#ffffff'
+                ctx.beginPath()
+                ctx.moveTo(arrowX - direction * arrowSize, glyphTop + 2)
+                ctx.lineTo(arrowX + direction * arrowSize * 0.4, glyphMiddle)
+                ctx.lineTo(arrowX - direction * arrowSize, glyphTop + GENE_GLYPH_HEIGHT - 2)
+                ctx.closePath()
+                ctx.fill()
+              }
             }
-            ctx.fill()
 
             geneHitRectsRef.current.push({
               gene,
               x: left,
-              y: boxTop,
+              y: laneTop,
               width: boxWidth,
               height: GENE_LANE_HEIGHT,
             })
 
-            // Below ~12px there's no room for a legible arrowhead; below
-            // ~3px the box itself collapses to a bare tick so it doesn't
-            // disappear into sub-pixel rounding.
-            if (boxWidth < 3) {
-              ctx.fillRect(left, boxTop, 1, GENE_LANE_HEIGHT)
-            } else if (gene.strand && boxWidth >= 12) {
-              const arrowSize = 4
-              const arrowX = gene.strand === '+' ? right - 3 : left + 3
-              const direction = gene.strand === '+' ? 1 : -1
-              ctx.fillStyle = isDarkMode ? '#1a1a1a' : '#ffffff'
-              ctx.beginPath()
-              ctx.moveTo(arrowX - direction * arrowSize, boxTop + 2)
-              ctx.lineTo(arrowX + direction * arrowSize * 0.4, boxTop + GENE_LANE_HEIGHT / 2)
-              ctx.lineTo(arrowX - direction * arrowSize, boxTop + GENE_LANE_HEIGHT - 2)
-              ctx.closePath()
-              ctx.fill()
-            }
-
-            if (boxWidth >= 24) {
-              ctx.fillStyle = '#fff'
-              ctx.font = '10px monospace'
-              ctx.textAlign = 'center'
-              ctx.textBaseline = 'middle'
-              const label =
-                gene.name.length > 20
-                  ? `${gene.name.slice(0, 18)}…`
-                  : gene.name
-              // Only draw the name inside the box when it actually fits;
-              // otherwise it would overflow the box and overlap neighbors.
-              const textWidth = ctx.measureText(label).width
-              if (textWidth + 6 <= boxWidth) {
-                ctx.fillText(label, (left + right) / 2, boxTop + GENE_LANE_HEIGHT / 2)
-              } else {
-                ctx.fillStyle = isDarkMode ? '#ccc' : '#333'
-                ctx.textAlign = 'left'
-                ctx.fillText(label, right + 3, boxTop + GENE_LANE_HEIGHT / 2)
-              }
+            // The name goes in the row above, centred on the visible part of
+            // the gene, and is skipped when it would run into the previous
+            // name in the same lane (genes are drawn in start order).
+            const label =
+              gene.name.length > 20 ? `${gene.name.slice(0, 18)}…` : gene.name
+            const textWidth = ctx.measureText(label).width
+            const visibleCentre =
+              (Math.max(left, 0) + Math.min(right, width)) / 2
+            const labelLeft = Math.min(
+              Math.max(visibleCentre - textWidth / 2, 2),
+              width - textWidth - 2,
+            )
+            if (labelLeft > labelRightByLane[lane]! + 6) {
+              ctx.fillStyle = isHoveredGene
+                ? geneColor
+                : isDarkMode
+                  ? '#ccc'
+                  : '#333'
+              ctx.fillText(label, labelLeft, laneTop + GENE_LABEL_HEIGHT / 2)
+              labelRightByLane[lane] = labelLeft + textWidth
             }
           }
 
@@ -3258,6 +3386,17 @@ function GraphCanvasComponent({
               bp)
               {hoveredGene.gene.strand && ` - strand ${hoveredGene.gene.strand}`}
             </div>
+            {(hoveredGene.gene.exons || hoveredGene.gene.extraColumns) && (
+              <div style={{ fontSize: '11px', opacity: 0.8 }}>
+                {[
+                  hoveredGene.gene.exons &&
+                    `${hoveredGene.gene.exons.length} exon${hoveredGene.gene.exons.length === 1 ? '' : 's'}`,
+                  ...(hoveredGene.gene.extraColumns ?? []),
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </div>
+            )}
           </div>
         )}
 

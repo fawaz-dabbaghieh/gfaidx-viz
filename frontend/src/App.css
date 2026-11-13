@@ -1574,3 +1574,60 @@ canvas {
     width: 100%;
   }
 }
+
+/* Gene search: a suggestion list under the "Find Gene" box. */
+.gene-search {
+  position: relative;
+}
+
+.gene-search-suggestions {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  margin: 2px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+}
+
+.gene-search-suggestions li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.gene-search-suggestions li span {
+  color: #666;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.gene-search-suggestions li.active {
+  background: #e8f0fb;
+}
+
+.gene-search-suggestions li.gene-search-empty {
+  color: #666;
+  cursor: default;
+}
+
+.app.dark-mode .gene-search-suggestions {
+  background: #1a1a1a;
+  border-color: #444;
+}
+
+.app.dark-mode .gene-search-suggestions li span,
+.app.dark-mode .gene-search-suggestions li.gene-search-empty {
+  color: #aaa;
+}
+
+.app.dark-mode .gene-search-suggestions li.active {
+  background: #24344d;
+}
