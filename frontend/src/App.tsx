@@ -126,6 +126,9 @@ const GFAIDX_MAX_NODES = 1_000_000
 // The layout engine parses node IDs as C++ ints for Linear Layout's node-ID
 // order (see hasNumericNodeIds).
 const INT32_MAX = 2_147_483_647
+// A fixed empty list for a hidden gene track, so the memoized canvas isn't
+// handed a new array (and re-rendered) on every App render.
+const NO_GENES: GeneRecord[] = []
 
 function App({ worker, onStopLayout }: AppProps) {
   const [layoutOptions, setLayoutOptions] = useState<LayoutOptions>({
@@ -1149,6 +1152,24 @@ function App({ worker, onStopLayout }: AppProps) {
     setNodeColorOverrides({})
   }, [])
 
+  // Stable (like the other Paths legend callbacks) so the memoized legend
+  // skips App re-renders that don't touch paths.
+  const handleTogglePath = useCallback((pathName: string) => {
+    setSelectedPathNames(currentSelected =>
+      currentSelected.includes(pathName)
+        ? currentSelected.filter(name => name !== pathName)
+        : [...currentSelected, pathName],
+    )
+  }, [])
+
+  const handleSelectAllPaths = useCallback(() => {
+    setSelectedPathNames(currentGraph?.paths?.map(path => path.name) ?? [])
+  }, [currentGraph])
+
+  const handleDeselectAllPaths = useCallback(() => {
+    setSelectedPathNames([])
+  }, [])
+
   // Feature C: toggles whether a path's copy-number track is shown under the
   // linear-layout ruler.
   const handleToggleCopyNumberPath = useCallback((pathName: string) => {
@@ -1726,19 +1747,9 @@ function App({ worker, onStopLayout }: AppProps) {
                   paths={currentGraph.paths}
                   isDarkMode={isDarkMode}
                   selectedPathNames={visiblePathNames}
-                  onTogglePath={pathName =>
-                    setSelectedPathNames(currentSelected =>
-                      currentSelected.includes(pathName)
-                        ? currentSelected.filter(name => name !== pathName)
-                        : [...currentSelected, pathName],
-                    )
-                  }
-                  onSelectAll={() =>
-                    setSelectedPathNames(
-                      currentGraph.paths?.map(path => path.name) ?? [],
-                    )
-                  }
-                  onDeselectAll={() => setSelectedPathNames([])}
+                  onTogglePath={handleTogglePath}
+                  onSelectAll={handleSelectAllPaths}
+                  onDeselectAll={handleDeselectAllPaths}
                   filterToSelectedPaths={filterToSelectedPaths}
                   onFilterToSelectedPathsChange={setFilterToSelectedPaths}
                   onColorPathNodes={handleColorPathNodes}
@@ -1919,7 +1930,8 @@ function App({ worker, onStopLayout }: AppProps) {
               csvColorOverrides={csvColorOverrides}
               nodeLabelOverrides={csvLabelOverrides}
               nodeCsvMetadata={csvNodeMetadata}
-              geneTrackAnnotations={showGeneTrack ? activeGeneTrack : []}
+              geneTrackAnnotations={showGeneTrack ? activeGeneTrack : NO_GENES}
+              geneTrackSource={geneTrackSource}
               copyNumberPathNames={copyNumberPathNames}
               onUseAsStartNode={setSubgraphStartNode}
               infoPanelWidth={clampedInfoPanelWidth}

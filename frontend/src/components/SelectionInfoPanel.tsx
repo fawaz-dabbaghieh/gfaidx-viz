@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import type { GraphNode } from '../types'
 import type { EdgePathGroup } from '../utils/displayGraph'
+import type { GeneRecord } from '../utils/geneTrackBed'
 
 export type SelectionInfo =
   | {
@@ -17,6 +18,15 @@ export type SelectionInfo =
       groups: EdgePathGroup[]
       totalPathCount: number
       visiblePathCount: number
+    }
+  | {
+      kind: 'gene'
+      gene: GeneRecord
+      source: string | null
+      referencePathName: string
+      // Bare names of the reference path's nodes the gene overlaps, in path
+      // order.
+      referenceNodeNames: string[]
     }
 
 // Exported so App can size the canvas to the space the panel leaves. The gap
@@ -114,7 +124,7 @@ export function SelectionInfoPanel({
       <aside className="selection-info-panel" style={{ width, height }}>
         {!selection && (
           <div className="selection-info-empty">
-            Click a node or connection to see its details here.
+            Click a node, connection, or gene to see its details here.
           </div>
         )}
 
@@ -169,6 +179,8 @@ export function SelectionInfoPanel({
           </>
         )}
 
+        {selection?.kind === 'gene' && <GeneDetails selection={selection} />}
+
         {selection?.kind === 'edge' && (
           <>
             <h4>Connection</h4>
@@ -214,12 +226,116 @@ function SelectionField({
   value,
 }: {
   label: string
-  value: string | number
+  value: React.ReactNode
 }) {
   return (
     <>
       <dt>{label}</dt>
       <dd>{value}</dd>
+    </>
+  )
+}
+
+// Links the transcript IDs the built-in genes carry (RefSeq, then Ensembl,
+// after the BED12 columns); other extra BED columns are shown as they are.
+function transcriptLink(value: string): { label: string; href: string } | null {
+  const id = value.split(' ')[0]!
+  if (/^[NX][MR]_\d+/.test(id)) {
+    return { label: 'RefSeq', href: `https://www.ncbi.nlm.nih.gov/nuccore/${id}` }
+  }
+  if (/^ENST\d+/.test(id)) {
+    return {
+      label: 'Ensembl',
+      href: `https://www.ensembl.org/Homo_sapiens/Transcript/Summary?t=${id.split('.')[0]}`,
+    }
+  }
+  return null
+}
+
+// Coding bases: exon bases inside the thickStart-thickEnd span.
+function codingLength(gene: GeneRecord): number | null {
+  const { exons, thickStart, thickEnd } = gene
+  if (!exons || thickStart === undefined || thickEnd === undefined) return null
+  return exons.reduce(
+    (sum, exon) =>
+      sum +
+      Math.max(0, Math.min(exon.end, thickEnd) - Math.max(exon.start, thickStart)),
+    0,
+  )
+}
+
+function GeneDetails({
+  selection,
+}: {
+  selection: Extract<SelectionInfo, { kind: 'gene' }>
+}) {
+  const { gene, source, referencePathName, referenceNodeNames } = selection
+  const coding = codingLength(gene)
+  const firstNode = referenceNodeNames[0]
+  const lastNode = referenceNodeNames[referenceNodeNames.length - 1]
+
+  return (
+    <>
+      <h4 title={gene.name}>{gene.name}</h4>
+      {source && <div className="selection-info-subtitle">{source}</div>}
+      <dl className="selection-info-fields">
+        <dt>Location</dt>
+        <dd>
+          {gene.chrom}:{gene.start.toLocaleString()}-{gene.end.toLocaleString()}
+        </dd>
+        <dt>Length</dt>
+        <dd>{(gene.end - gene.start).toLocaleString()} bp</dd>
+        {gene.strand && (
+          <>
+            <dt>Strand</dt>
+            <dd>{gene.strand}</dd>
+          </>
+        )}
+        {gene.exons && (
+          <>
+            <dt>Exons</dt>
+            <dd>{gene.exons.length}</dd>
+          </>
+        )}
+        {coding !== null && coding > 0 && (
+          <>
+            <dt>Coding</dt>
+            <dd>{coding.toLocaleString()} bp</dd>
+          </>
+        )}
+        {(gene.extraColumns ?? []).map((value, index) => {
+          const link = transcriptLink(value)
+          return link ? (
+            <SelectionField
+              key={`extra:${index}`}
+              label={link.label}
+              value={
+                <a href={link.href} target="_blank" rel="noreferrer">
+                  {value}
+                </a>
+              }
+            />
+          ) : (
+            <SelectionField
+              key={`extra:${index}`}
+              label={`Column ${13 + index}`}
+              value={value}
+            />
+          )
+        })}
+      </dl>
+      {referencePathName && (
+        <div className="selection-info-section">
+          <h5>Reference nodes ({referenceNodeNames.length.toLocaleString()})</h5>
+          <div className="selection-info-subtitle" title={referencePathName}>
+            {referenceNodeNames.length === 0
+              ? `None of ${referencePathName} is drawn here.`
+              : referenceNodeNames.length === 1
+                ? `Node ${firstNode} on ${referencePathName}`
+                : `Nodes ${firstNode} to ${lastNode} on ${referencePathName}`}
+          </div>
+        </div>
+      )}
     </>
   )
 }

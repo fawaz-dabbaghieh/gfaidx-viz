@@ -1631,3 +1631,11 @@ canvas {
 .app.dark-mode .gene-search-suggestions li.active {
   background: #24344d;
 }
+
+.selection-info-panel a {
+  color: #0066cc;
+}
+
+.app.dark-mode .selection-info-panel a {
+  color: #7fb2ff;
+}

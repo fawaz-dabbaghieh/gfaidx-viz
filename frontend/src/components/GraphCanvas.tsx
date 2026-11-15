@@ -270,6 +270,9 @@ interface GraphCanvasProps {
   // reference path's sequence name happens inside this component, where
   // referencePathCoordinates is already computed.
   geneTrackAnnotations?: GeneRecord[]
+  // Where the genes come from (a BED file name or the built-in set), shown
+  // in the info panel for a clicked gene.
+  geneTrackSource?: string | null
   // Feature C (copy-number track): names of paths the user has toggled on in
   // the Paths legend, each drawn as its own colored line.
   copyNumberPathNames?: string[]
@@ -357,6 +360,7 @@ function GraphCanvasComponent({
   nodeLabelOverrides,
   nodeCsvMetadata,
   geneTrackAnnotations,
+  geneTrackSource = null,
   copyNumberPathNames,
   onUseAsStartNode,
   infoPanelWidth = SELECTION_INFO_PANEL_DEFAULT_WIDTH,
@@ -413,6 +417,9 @@ function GraphCanvasComponent({
     { binIndex: number; screenX: number }[]
   >([])
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  // A clicked gene in the gene track, shown in the info panel instead of a
+  // node or connection (only one of the three is ever selected).
+  const [selectedGene, setSelectedGene] = useState<GeneRecord | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
@@ -899,6 +906,7 @@ function GraphCanvasComponent({
     setTransform(nextTransform)
     setSelectedNode(targetNode.representativeId)
     setSelectedEdgeKey(null)
+    setSelectedGene(null)
     setHoveredNode(null)
     setHoveredEdge(null)
     reportInternalZoom(nextScale)
@@ -981,7 +989,13 @@ function GraphCanvasComponent({
     setHoveredEdge(null)
     setSelectedNode(null)
     setSelectedEdgeKey(null)
+    setSelectedGene(null)
   }, [visibleDisplayGraphTopology])
+
+  // A different gene set or reference makes the clicked gene stale.
+  useEffect(() => {
+    setSelectedGene(null)
+  }, [geneTrackAnnotations, referencePathName, linearLayout])
 
   // Colors depend on graph data and user settings, not the viewport. Cache
   // them so wheel/pan redraws only perform a map lookup per visible node.
@@ -2092,7 +2106,8 @@ function GraphCanvasComponent({
             const glyphTop = laneTop + GENE_LABEL_HEIGHT
             const glyphMiddle = glyphTop + GENE_GLYPH_HEIGHT / 2
             const boxWidth = Math.max(right - left, 1)
-            const isHoveredGene = hoveredGene?.gene === gene
+            const isHoveredGene =
+              hoveredGene?.gene === gene || selectedGene === gene
             const geneColor = isHoveredGene
               ? '#f0a500'
               : gene.strand === '-'
@@ -2439,6 +2454,7 @@ function GraphCanvasComponent({
     referencePathCoordinates,
     geneTrackLanes,
     hoveredGene,
+    selectedGene,
     copyNumberTracks,
     getPathColor,
   ])
@@ -2642,13 +2658,13 @@ function GraphCanvasComponent({
         // Left click
         setDragStart({ x: e.clientX, y: e.clientY })
 
-        // Gene track click: "select" per the spec is deliberately minimal
-        // for now (logging), since this is explicitly a secondary feature
-        // on top of the static track ("do this only after the static track
-        // renders correctly"). Returning early also keeps a gene click from
-        // also starting a pan, since the track sits over the same canvas.
+        // Gene track click: shows the gene in the info panel. Returning
+        // early also keeps a gene click from starting a pan, since the track
+        // sits over the same canvas.
         if (hoveredGene) {
-          console.log('Gene selected:', hoveredGene.gene)
+          setSelectedGene(hoveredGene.gene)
+          setSelectedNode(null)
+          setSelectedEdgeKey(null)
           return
         }
 
@@ -2658,6 +2674,7 @@ function GraphCanvasComponent({
           setDraggingNodeId(hoveredNode)
           setSelectedNode(hoveredNode)
           setSelectedEdgeKey(null)
+          setSelectedGene(null)
         } else {
           // Prepare for view panning. Selection only changes on mouseup, and
           // only if the pointer didn't move, so panning keeps the panel.
@@ -3116,6 +3133,7 @@ function GraphCanvasComponent({
           hoveredEdge !== null ? displayGraph.edges[hoveredEdge] : undefined
         setSelectedEdgeKey(clickedEdge?.key ?? null)
         setSelectedNode(null)
+        setSelectedGene(null)
       }
 
       setIsDragging(false)
@@ -3168,6 +3186,25 @@ function GraphCanvasComponent({
       visiblePathCount: edge.pathIds.filter(isPathVisible).length,
     }
   }, [selectedEdgeKey, visibleDisplayGraphTopology, graph.paths, isPathVisible])
+
+  // The drawn reference path's nodes that the gene overlaps, from the same
+  // node-to-bp spans the ruler uses.
+  const selectedGeneInfo = useMemo((): SelectionInfo | null => {
+    if (!selectedGene) return null
+    const spans = referencePathCoordinates?.backboneNodeSpans ?? []
+    return {
+      kind: 'gene',
+      gene: selectedGene,
+      source: geneTrackSource,
+      referencePathName,
+      referenceNodeNames: spans
+        .filter(
+          span =>
+            span.bpEnd > selectedGene.start && span.bpStart < selectedGene.end,
+        )
+        .map(span => span.bareName),
+    }
+  }, [selectedGene, referencePathCoordinates, geneTrackSource, referencePathName])
 
   return (
     <div className="graph-canvas-with-info">
@@ -3468,7 +3505,7 @@ function GraphCanvasComponent({
         )}
       </div>
       <SelectionInfoPanel
-        selection={selectedEdgeInfo ?? selectedNodeInfo}
+        selection={selectedGeneInfo ?? selectedEdgeInfo ?? selectedNodeInfo}
         width={infoPanelWidth}
         maxWidth={infoPanelMaxWidth}
         onWidthChange={onInfoPanelWidthChange}

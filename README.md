@@ -62,12 +62,14 @@ provide through their rGFA tags.
 
 ### Inspect nodes and connections
 
-Click a node or a connection to see its details in the panel next to the
-graph:
+Click a node, a connection, or a gene to see its details in the panel next to
+the graph:
 
 - **Node**: length, depth, a sequence preview, its GFA tags, and every path
   that visits it.
 - **Connection**: every path that crosses it, in each direction.
+- **Gene**: location, strand, exons, coding length, links to its RefSeq and
+  Ensembl transcripts, and the reference nodes it covers.
 
 When a path loops through the same spot several times, as in repeats, the
 count is shown next to its name, e.g. `CHM13#0#chr20 (10×)`. Drag the panel's
