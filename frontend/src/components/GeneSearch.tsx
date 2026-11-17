@@ -42,6 +42,12 @@ export function GeneSearch({
     text: string
     isError: boolean
   } | null>(null)
+  // The picked gene, so a flank change re-fills its region. Kept with its
+  // assembly: its coordinates don't apply once the graph's assembly changes.
+  const [pickedGene, setPickedGene] = useState<{
+    assembly: GeneAssembly
+    gene: GeneLocation
+  } | null>(null)
 
   // Search the selected track's assembly, or else the first GRCh38/CHM13
   // track's, so e.g. picking a haplotype track still searches the reference.
@@ -82,9 +88,9 @@ export function GeneSearch({
       .finally(() => setIsLoadingIndex(false))
   }
 
-  const selectGene = (gene: GeneLocation) => {
-    const flankBp = Number(flankInput)
-    if (!Number.isInteger(flankBp) || flankBp < 0) {
+  const fillGeneRegion = (gene: GeneLocation, flankText: string) => {
+    const flankBp = Number(flankText)
+    if (flankText.trim() === '' || !Number.isInteger(flankBp) || flankBp < 0) {
       setMessage({ text: 'Flank must be a whole number of bp.', isError: true })
       return
     }
@@ -109,8 +115,6 @@ export function GeneSearch({
       }
     })
 
-    setQuery(gene.symbol)
-    setSuggestionsOpen(false)
     const track = regionPaths[trackIndex]
     if (!track) {
       setMessage({
@@ -132,6 +136,13 @@ export function GeneSearch({
         `${end.toLocaleString()}. Run the query to load it.`,
       isError: false,
     })
+  }
+
+  const selectGene = (gene: GeneLocation) => {
+    setQuery(gene.symbol)
+    setSuggestionsOpen(false)
+    setPickedGene(assembly ? { assembly, gene } : null)
+    fillGeneRegion(gene, flankInput)
   }
 
   const isDisabled = disabled || !assembly
@@ -168,6 +179,7 @@ export function GeneSearch({
           onBlur={() => setSuggestionsOpen(false)}
           onChange={event => {
             setQuery(event.currentTarget.value)
+            setPickedGene(null)
             setActiveSuggestion(0)
             setSuggestionsOpen(true)
             setMessage(null)
@@ -243,7 +255,13 @@ export function GeneSearch({
           min="0"
           step="1000"
           value={flankInput}
-          onChange={event => setFlankInput(event.currentTarget.value)}
+          onChange={event => {
+            const flankText = event.currentTarget.value
+            setFlankInput(flankText)
+            if (pickedGene && pickedGene.assembly === assembly) {
+              fillGeneRegion(pickedGene.gene, flankText)
+            }
+          }}
           disabled={isDisabled}
         />
         <div className="control-hint">Added on both sides of the gene.</div>
