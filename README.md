@@ -32,6 +32,8 @@ The app opens with an example ready to run: the amylase locus (AMY1C, plus
 50 kb either side) on the HPRC release 2 Minigraph-Cactus CHM13 graph. If a
 result is too large for the server or the browser, the app shows the `gfaidx`
 command that extracts it from a downloaded copy of the indexed graph.
+Results of up to 10,000 nodes are laid out straight away; larger ones wait
+for you to press Compute Layout.
 
 ![The Query tab](docs/images/query.png)
 

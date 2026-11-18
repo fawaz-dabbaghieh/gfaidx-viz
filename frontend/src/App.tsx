@@ -110,6 +110,10 @@ const LOCAL_GRAPH_ID_PREFIX = '__local_graph__:'
 // with a desktop tool instead.
 const LARGE_GRAPH_NODE_WARNING_THRESHOLD = 50000
 
+// Graphs up to this many nodes are laid out as soon as they're loaded; larger
+// ones wait for the user to press Compute Layout.
+const AUTO_LAYOUT_MAX_NODES = 10000
+
 // The canvas fills the graph section's width (minus the info panel) and about
 // one screen of height. CHROME is the section's own header and padding.
 const MIN_CANVAS_WIDTH = 400
@@ -1430,11 +1434,12 @@ function App({ worker, onStopLayout }: AppProps) {
   // one was still running) can't overwrite state after the fact.
   const requestIdRef = useRef(0)
 
-  // Layout is user-triggered rather than automatic: loading a graph is
-  // instant regardless of size, and a potentially slow/heavy layout only
-  // starts when the user actually asks for it via the Compute
-  // Layout/Redraw button - the same load-then-layout split BandageNG uses,
-  // so a huge graph never makes the app look stuck the moment it's opened.
+  // Layout is user-triggered for large graphs: loading a graph is instant
+  // regardless of size, and a potentially slow/heavy layout only starts when
+  // the user asks for it via the Compute Layout/Redraw button - the same
+  // load-then-layout split BandageNG uses, so a huge graph never makes the
+  // app look stuck the moment it's opened. Small graphs (up to
+  // AUTO_LAYOUT_MAX_NODES) are laid out automatically, see below.
   const computeLayout = useCallback(async () => {
     if (!worker || !currentGraph) {
       console.warn('Worker not ready or no graph loaded')
@@ -1481,6 +1486,18 @@ function App({ worker, onStopLayout }: AppProps) {
     setAppliedLayoutOptions(null)
     setIsComputing(false)
   }, [currentGraph])
+
+  // Lays out each newly loaded small graph once. Declared after the reset
+  // above, so its request ID isn't immediately made stale by it. The ref
+  // keeps a changed option or a fresh worker (after Stop or a failed layout)
+  // from starting another automatic layout of the same graph.
+  const autoLaidOutGraphRef = useRef<typeof currentGraph>(null)
+  useEffect(() => {
+    if (!worker || !currentGraph) return
+    if (autoLaidOutGraphRef.current === currentGraph) return
+    autoLaidOutGraphRef.current = currentGraph
+    if (graphNodeCount <= AUTO_LAYOUT_MAX_NODES) void computeLayout()
+  }, [worker, currentGraph, graphNodeCount, computeLayout])
 
   useEffect(() => {
     if (!isComputing) {
