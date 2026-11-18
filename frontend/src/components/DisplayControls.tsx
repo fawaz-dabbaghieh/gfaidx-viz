@@ -1,7 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import type { ColorScheme, LayoutOptions, GraphPath } from '../types'
 import { pathHasRepeatedSegments } from '../utils/displayGraph'
 import { HelpIcon } from './HelpIcon'
+import { SearchSelect } from './SearchSelect'
+
+// A Reference Path choice: a path, or '' for node-ID order.
+interface ReferenceOption {
+  name: string
+  label: string
+  // A path that repeats a segment can't be laid out as a straight line.
+  disabled: boolean
+}
+
+// Module-level so SearchSelect's per-item search text is computed once.
+const referenceOptionLabel = (option: ReferenceOption) => option.label
+const referenceOptionDisabled = (option: ReferenceOption) => option.disabled
 
 interface DisplayControlsProps {
   options: LayoutOptions
@@ -48,7 +61,6 @@ export function DisplayControls({
 }: DisplayControlsProps) {
   // The zoom slider is temporarily hidden (broken sync with canvas wheel-zoom);
   // `zoom`/`onZoomChange` stay in the prop contract for when it's re-enabled.
-  const [referencePathQuery, setReferencePathQuery] = useState('')
   const repeatedReferencePathNames = useMemo(() => {
     const repeatedPaths = new Set<string>()
 
@@ -59,16 +71,23 @@ export function DisplayControls({
 
     return repeatedPaths
   }, [paths])
-  // A pangenome graph can have hundreds of haplotype paths, at which point
-  // scrolling a plain <select> to find one by eye stops being practical.
-  const filteredReferencePaths = useMemo(() => {
-    const query = referencePathQuery.trim().toLocaleLowerCase()
-    if (!query) return paths
-    return paths.filter(path => path.name.toLocaleLowerCase().includes(query))
-  }, [paths, referencePathQuery])
-  const selectedReferencePathIsVisible =
-    options.referencePathName === '' ||
-    filteredReferencePaths.some(path => path.name === options.referencePathName)
+  // A pangenome graph can have hundreds of haplotype paths, so the list can
+  // be searched as well as scrolled.
+  const referenceOptions = useMemo((): ReferenceOption[] => {
+    const pathOptions = paths.map(path => {
+      const disabled = repeatedReferencePathNames.has(path.name)
+      return {
+        name: path.name,
+        label: disabled
+          ? `${path.name} (repeated segments - unavailable)`
+          : path.name,
+        disabled,
+      }
+    })
+    return canOrderByNodeId
+      ? [{ name: '', label: 'Node ID order', disabled: false }, ...pathOptions]
+      : pathOptions
+  }, [canOrderByNodeId, paths, repeatedReferencePathNames])
   const linearLayoutUnavailable = !canOrderByNodeId && !hasPathsInGraph
 
   return (
@@ -160,103 +179,40 @@ export function DisplayControls({
         </div>
 
         {options.linearLayout && hasPathsInGraph && (
-          <>
-            {paths.length > 8 && (
-              <div className="control-group">
-                <label htmlFor="reference-path-search">
-                  Search Reference Paths
-                </label>
-                <input
-                  id="reference-path-search"
-                  className="control-input"
-                  type="search"
-                  value={referencePathQuery}
-                  onChange={event =>
-                    setReferencePathQuery(event.currentTarget.value)
-                  }
-                  onKeyDown={event => {
-                    if (event.key !== 'Enter') return
-                    event.preventDefault()
-                    const firstMatch = filteredReferencePaths.find(
-                      path => !repeatedReferencePathNames.has(path.name),
-                    )
-                    if (firstMatch) {
-                      onChange({
-                        ...options,
-                        referencePathName: firstMatch.name,
-                      })
-                    }
-                  }}
-                  placeholder="Type a path or sample name"
-                  disabled={isComputing}
-                />
-                <div className="control-hint">
-                  {filteredReferencePaths.length.toLocaleString()} of{' '}
-                  {paths.length.toLocaleString()} paths
-                </div>
+          <div className="control-group">
+            <label htmlFor="reference-path-select">
+              <strong>Reference Path:</strong>
+            </label>
+            <SearchSelect
+              id="reference-path-select"
+              items={referenceOptions}
+              selectedIndex={referenceOptions.findIndex(
+                option => option.name === options.referencePathName,
+              )}
+              getLabel={referenceOptionLabel}
+              isDisabled={referenceOptionDisabled}
+              onSelect={index =>
+                onChange({
+                  ...options,
+                  referencePathName: referenceOptions[index]!.name,
+                })
+              }
+              placeholder="Choose a reference path..."
+              disabled={isComputing}
+            />
+            <div className="control-hint">
+              Keep the selected path horizontal in traversal order.
+              {!canOrderByNodeId &&
+                " Node IDs aren't numeric, so a path is required."}
+            </div>
+            {repeatedReferencePathNames.size > 0 && (
+              <div className="control-error">
+                {repeatedReferencePathNames.size} path
+                {repeatedReferencePathNames.size === 1 ? '' : 's'} cannot be
+                used as a reference because they repeat a segment.
               </div>
             )}
-            <div className="control-group">
-              <label htmlFor="reference-path-select">
-                <strong>Reference Path:</strong>
-              </label>
-              <select
-                id="reference-path-select"
-                className="control-select"
-                value={
-                  selectedReferencePathIsVisible ? options.referencePathName : ''
-                }
-                onChange={event =>
-                  onChange({
-                    ...options,
-                    referencePathName: event.currentTarget.value,
-                  })
-                }
-                disabled={isComputing}
-              >
-                {canOrderByNodeId ? (
-                  <option value="">Node ID order</option>
-                ) : (
-                  <option value="" disabled>
-                    Choose a reference path...
-                  </option>
-                )}
-                {!selectedReferencePathIsVisible && (
-                  <option value={options.referencePathName} disabled>
-                    {options.referencePathName} (hidden by search)
-                  </option>
-                )}
-                {filteredReferencePaths.map(path => {
-                  const hasRepeatedSegments =
-                    repeatedReferencePathNames.has(path.name)
-                  return (
-                    <option
-                      key={path.name}
-                      value={path.name}
-                      disabled={hasRepeatedSegments}
-                    >
-                      {path.name}
-                      {hasRepeatedSegments
-                        ? ' (repeated segments - unavailable)'
-                        : ''}
-                    </option>
-                  )
-                })}
-              </select>
-              <div className="control-hint">
-                Keep the selected path horizontal in traversal order.
-                {!canOrderByNodeId &&
-                  " Node IDs aren't numeric, so a path is required."}
-              </div>
-              {repeatedReferencePathNames.size > 0 && (
-                <div className="control-error">
-                  {repeatedReferencePathNames.size} path
-                  {repeatedReferencePathNames.size === 1 ? '' : 's'} cannot be
-                  used as a reference because they repeat a segment.
-                </div>
-              )}
-            </div>
-          </>
+          </div>
         )}
 
         {options.linearLayout && options.referencePathName && (

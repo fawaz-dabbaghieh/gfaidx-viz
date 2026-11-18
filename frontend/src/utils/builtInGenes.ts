@@ -1,4 +1,4 @@
-import type { Graph } from '../types'
+import type { Graph, RegionPath } from '../types'
 import { parseGeneTrackBed, type GeneRecord } from './geneTrackBed'
 
 // Gene annotations shipped with the app, built by
@@ -48,6 +48,89 @@ export function detectGeneAssembly(
   const sample = sampleName || (parts.length > 1 ? parts[0]! : '')
   const assembly = assemblyFromName(sample || graphName)
   return assembly ? { assembly, chrom } : null
+}
+
+// The track to select when a graph's tracks load: the first one on the
+// graph's own reference, going by its name, since a GRCh38-based graph can
+// list its CHM13 tracks first. Otherwise the first track.
+export function defaultTrackIndex(
+  regionPaths: RegionPath[],
+  graphName: string,
+): number {
+  const assembly = assemblyFromName(graphName)
+  if (!assembly) return 0
+  const index = regionPaths.findIndex(
+    regionPath =>
+      detectGeneAssembly(regionPath.reference, regionPath.sequence, graphName)
+        ?.assembly === assembly,
+  )
+  return Math.max(index, 0)
+}
+
+// The assembly gene search uses for a graph's coordinate tracks: the selected
+// track's, or else the first GRCh38/CHM13 track's, so e.g. a haplotype track
+// being selected still searches the reference.
+export function geneAssemblyForTracks(
+  regionPaths: RegionPath[],
+  selectedIndex: number,
+  graphName: string,
+): GeneAssembly | null {
+  const assemblyOf = (regionPath: RegionPath | undefined) =>
+    regionPath
+      ? (detectGeneAssembly(regionPath.reference, regionPath.sequence, graphName)
+          ?.assembly ?? null)
+      : null
+  const selected = assemblyOf(regionPaths[selectedIndex])
+  if (selected) return selected
+  for (const regionPath of regionPaths) {
+    const found = assemblyOf(regionPath)
+    if (found) return found
+  }
+  return null
+}
+
+// The region query for a gene plus flankBp on each side: the gene's
+// chromosome in the same assembly, clamped to the track. A W-line reference
+// can be split into several tracks, so one containing the whole gene wins.
+export function geneRegion(
+  gene: GeneLocation,
+  flankBp: number,
+  assembly: GeneAssembly,
+  regionPaths: RegionPath[],
+  graphName: string,
+): { trackIndex: number; start: number; end: number } | { error: string } {
+  let trackIndex = -1
+  let trackContainsGene = false
+  regionPaths.forEach((regionPath, index) => {
+    const match = detectGeneAssembly(
+      regionPath.reference,
+      regionPath.sequence,
+      graphName,
+    )
+    if (match?.assembly !== assembly || match.chrom !== gene.chrom) return
+    const containsGene =
+      regionPath.start <= gene.start &&
+      (regionPath.end === null || regionPath.end >= gene.end)
+    if (trackIndex === -1 || (containsGene && !trackContainsGene)) {
+      trackIndex = index
+      trackContainsGene = containsGene
+    }
+  })
+
+  const track = regionPaths[trackIndex]
+  if (!track) {
+    return {
+      error: `${gene.symbol} is on ${gene.chrom}, which this graph has no ${assembly} track for.`,
+    }
+  }
+  return {
+    trackIndex,
+    start: Math.max(track.start, gene.start - flankBp),
+    end:
+      track.end === null
+        ? gene.end + flankBp
+        : Math.min(track.end, gene.end + flankBp),
+  }
 }
 
 // Files are gzipped to keep them small (chr1 is ~160 KB) and inflated with

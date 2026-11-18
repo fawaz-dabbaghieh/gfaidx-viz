@@ -11,6 +11,7 @@ import {
 import { PathsLegend } from './components/PathsLegend'
 import { StatsPanel } from './components/StatsPanel'
 import { GraphExtractionControls } from './components/GraphExtractionControls'
+import { HeaderLinks } from './components/HeaderLinks'
 import { NodeStyleCsvPanel } from './components/NodeStyleCsvPanel'
 import { BandageLayoutWorker } from './utils/BandageLayoutWorker'
 import { parseGFA } from './utils/gfaParser'
@@ -24,8 +25,15 @@ import { parseGeneTrackBed, type GeneRecord } from './utils/geneTrackBed'
 import {
   BUILT_IN_GENE_SOURCE,
   builtInGeneSetForPath,
+  defaultTrackIndex,
   loadBuiltInGenes,
 } from './utils/builtInGenes'
+import { EXAMPLE_GRAPH_ID } from './utils/exampleQuery'
+import {
+  gfaidxRegionCommand,
+  gfaidxSubgraphCommand,
+  isServerSizeLimitError,
+} from './utils/gfaidxCommand'
 import { clampZoom } from './utils/zoom'
 import {
   GfaidxResultTooLargeError,
@@ -171,16 +179,22 @@ function App({ worker, onStopLayout }: AppProps) {
   const [urlInput, setUrlInput] = useState('')
   const [loadingFile, setLoadingFile] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  // An extraction whose result is too large to display; its download link is
-  // shown only while loadError is still that extraction's message.
+  // An extraction too large for the server or for display: its download link
+  // (if it finished) and the gfaidx command to run it locally are shown only
+  // while loadError is still that extraction's message.
   const [oversizedResult, setOversizedResult] = useState<{
     message: string
-    downloadUrl: string
+    downloadUrl: string | null
+    command: string
   } | null>(null)
-  const oversizedResultUrl =
-    oversizedResult && oversizedResult.message === loadError
-      ? oversizedResult.downloadUrl
-      : null
+  const isOversizedResultShown =
+    oversizedResult !== null && oversizedResult.message === loadError
+  const oversizedResultUrl = isOversizedResultShown
+    ? oversizedResult.downloadUrl
+    : null
+  const oversizedResultCommand = isOversizedResultShown
+    ? oversizedResult.command
+    : null
   const [currentGraph, setCurrentGraph] = useState<Graph | null>(null)
   // The raw GFA text currentGraph was parsed from, kept only so "Download
   // GFA" can hand back exactly what was loaded rather than re-serializing
@@ -278,7 +292,7 @@ function App({ worker, onStopLayout }: AppProps) {
   const [subgraphStartNode, setSubgraphStartNode] = useState('')
   const [subgraphMaxNodes, setSubgraphMaxNodes] = useState('200')
   const [regionMaxNodes, setRegionMaxNodes] = useState('200')
-  const [extractionWithCoords, setExtractionWithCoords] = useState(false)
+  const [extractionWithCoords, setExtractionWithCoords] = useState(true)
   const [extractAllHaplotypes, setExtractAllHaplotypes] = useState(true)
   const [manualRegionReference, setManualRegionReference] = useState('')
   const [manualRegionSequence, setManualRegionSequence] = useState('')
@@ -411,6 +425,11 @@ function App({ worker, onStopLayout }: AppProps) {
             return currentGraphId
           }
 
+          // The example query's graph, so the app opens ready to run it.
+          if (graphs.some(graph => graph.id === EXAMPLE_GRAPH_ID)) {
+            return EXAMPLE_GRAPH_ID
+          }
+
           return graphs[0]?.id ?? ''
         })
       } catch (error) {
@@ -479,17 +498,18 @@ function App({ worker, onStopLayout }: AppProps) {
         if (cancelled) return
 
         setRegionPaths(paths)
-        setSelectedRegionPathIndex(0)
-        const firstPath = paths[0]
-        if (firstPath) {
+        const defaultIndex = defaultTrackIndex(paths, selectedIndexedGraph)
+        setSelectedRegionPathIndex(defaultIndex)
+        const defaultPath = paths[defaultIndex]
+        if (defaultPath) {
           // See handleSelectedRegionPathChange for why null is handled here.
           const defaultEnd =
-            firstPath.end === null
-              ? firstPath.start + 100000
-              : Math.min(firstPath.start + 100000, firstPath.end)
-          setManualRegionReference(firstPath.reference)
-          setManualRegionSequence(firstPath.sequence)
-          setRegionStart(String(firstPath.start))
+            defaultPath.end === null
+              ? defaultPath.start + 100000
+              : Math.min(defaultPath.start + 100000, defaultPath.end)
+          setManualRegionReference(defaultPath.reference)
+          setManualRegionSequence(defaultPath.sequence)
+          setRegionStart(String(defaultPath.start))
           setRegionEnd(String(defaultEnd))
         } else {
           setManualRegionReference('')
@@ -547,15 +567,24 @@ function App({ worker, onStopLayout }: AppProps) {
     [regionPaths],
   )
 
-  // Gene search picked a gene: select its coordinate track and fill in the
-  // flanked region, leaving the user to run the query.
-  const handleSelectGeneRegion = useCallback(
-    (regionPathIndex: number, start: number, end: number) => {
-      const regionPath = regionPaths[regionPathIndex]
-      if (!regionPath) return
-      setSelectedRegionPathIndex(regionPathIndex)
-      setManualRegionReference(regionPath.reference)
-      setManualRegionSequence(regionPath.sequence)
+  // The region field or a picked gene set the track and region together. A
+  // graph without coordinate tracks takes the sequence name as typed.
+  const handleSetRegion = useCallback(
+    (
+      regionPathIndex: number | null,
+      sequence: string,
+      start: number,
+      end: number,
+    ) => {
+      const regionPath =
+        regionPathIndex === null ? undefined : regionPaths[regionPathIndex]
+      if (regionPath) {
+        setSelectedRegionPathIndex(regionPathIndex!)
+        setManualRegionReference(regionPath.reference)
+        setManualRegionSequence(regionPath.sequence)
+      } else {
+        setManualRegionSequence(sequence)
+      }
       setRegionStart(String(start))
       setRegionEnd(String(end))
       setLoadError(null)
@@ -915,8 +944,21 @@ function App({ worker, onStopLayout }: AppProps) {
 
       const message =
         error instanceof Error ? error.message : 'Failed to extract subgraph'
-      if (error instanceof GfaidxResultTooLargeError) {
-        setOversizedResult({ message, downloadUrl: error.downloadUrl })
+      if (
+        error instanceof GfaidxResultTooLargeError ||
+        isServerSizeLimitError(message)
+      ) {
+        setOversizedResult({
+          message,
+          downloadUrl:
+            error instanceof GfaidxResultTooLargeError ? error.downloadUrl : null,
+          command: gfaidxSubgraphCommand({
+            graphId: selectedIndexedGraph,
+            startNode,
+            maxNodes,
+            withCoords: extractionWithCoords,
+          }),
+        })
       }
       setLoadError(message)
     }
@@ -1012,8 +1054,25 @@ function App({ worker, onStopLayout }: AppProps) {
 
       const message =
         error instanceof Error ? error.message : 'Failed to extract region'
-      if (error instanceof GfaidxResultTooLargeError) {
-        setOversizedResult({ message, downloadUrl: error.downloadUrl })
+      if (
+        error instanceof GfaidxResultTooLargeError ||
+        isServerSizeLimitError(message)
+      ) {
+        setOversizedResult({
+          message,
+          downloadUrl:
+            error instanceof GfaidxResultTooLargeError ? error.downloadUrl : null,
+          command: gfaidxRegionCommand({
+            graphId: selectedIndexedGraph,
+            reference,
+            sequence,
+            start,
+            end,
+            allHaplotypes: extractAllHaplotypes,
+            maxNodes,
+            withCoords: extractionWithCoords,
+          }),
+        })
       }
       setLoadError(message)
     }
@@ -1612,6 +1671,7 @@ function App({ worker, onStopLayout }: AppProps) {
               </button>
             </form>
           )}
+          <HeaderLinks />
         </div>
       </header>
 
@@ -1684,11 +1744,9 @@ function App({ worker, onStopLayout }: AppProps) {
               manualRegionReference={manualRegionReference}
               onManualRegionReferenceChange={setManualRegionReference}
               manualRegionSequence={manualRegionSequence}
-              onManualRegionSequenceChange={setManualRegionSequence}
               regionStart={regionStart}
-              onRegionStartChange={setRegionStart}
               regionEnd={regionEnd}
-              onRegionEndChange={setRegionEnd}
+              onSetRegion={handleSetRegion}
               allHaplotypes={extractAllHaplotypes}
               onAllHaplotypesChange={setExtractAllHaplotypes}
               onExtractRegion={handleExtractRegion}
@@ -1696,11 +1754,11 @@ function App({ worker, onStopLayout }: AppProps) {
               jobProgress={gfaidxJobProgress}
               extractionError={loadError}
               extractionDownloadUrl={oversizedResultUrl}
+              extractionCommand={oversizedResultCommand}
               bedAnnotations={bedAnnotations}
               selectedBedAnnotation={selectedBedAnnotation}
               onBedAnnotationsChange={handleBedAnnotationsChange}
               onSelectBedAnnotation={handleSelectBedAnnotation}
-              onSelectGeneRegion={handleSelectGeneRegion}
             />
           </div>
           <div hidden={controlTab !== 'display'}>

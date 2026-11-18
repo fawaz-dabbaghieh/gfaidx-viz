@@ -111,6 +111,35 @@ body:has(.app.dark-mode) {
   font-weight: normal;
 }
 
+.header-links {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+  font-size: 14px;
+}
+
+.header-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #333;
+  text-decoration: none;
+}
+
+.header-links a:hover {
+  color: #0066cc;
+  text-decoration: underline;
+}
+
+.app.dark-mode .header-links a {
+  color: #ddd;
+}
+
+.app.dark-mode .header-links a:hover {
+  color: #7fb2ff;
+}
+
 /* Menu Bar */
 .menu-bar {
   display: flex;
@@ -429,33 +458,231 @@ body:has(.app.dark-mode) {
   padding: 10px 24px;
 }
 
-.query-options {
+/* Query tab: the mode switch, then the main fields in one row (Graph, then
+   the track/gene/node and the region), then the options. */
+.query-mode-bar {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 0 32px;
-  margin-bottom: 15px;
-  border-bottom: 1px solid #ddd;
+  align-items: center;
+  gap: 8px 22px;
+  margin-bottom: 22px;
+  font-size: 15px;
 }
 
-.app.dark-mode .query-options {
-  border-bottom-color: #444;
+.query-mode-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
 }
 
-.query-graph-select {
-  flex: 0 1 420px;
-  min-width: 260px;
+.query-mode-bar label:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
-.query-fields {
+.query-mode-bar input {
+  margin: 0;
+}
+
+.query-mode-title {
+  font-weight: 600;
+}
+
+.query-main-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 360px));
   gap: 0 20px;
+  /* With the fields' own 15px margin, the same gap as above the row. */
+  margin-bottom: 7px;
 }
 
-/* Start / End become two cells of the query grid instead of a nested row. */
-.query-fields .control-row {
-  display: contents;
+.query-main-field label {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.query-main-field .control-input {
+  padding: 10px 12px;
+  font-size: 16px;
+}
+
+.query-options-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 28px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.query-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.query-option.extraction-mode-options {
+  margin: 0;
+  gap: 6px 14px;
+}
+
+.query-option.extraction-mode-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.query-option input[type='checkbox'],
+.query-option input[type='radio'] {
+  margin: 0;
+}
+
+.query-option .control-input {
+  width: 160px;
+}
+
+.query-option .query-option-number {
+  width: 100px;
+}
+
+.graph-control-form .query-submit .compute-button {
+  min-width: 260px;
+  padding: 12px 28px;
+  font-size: 16px;
+}
+
+.gene-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gene-field-row .gene-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.gene-flank {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.query-main-field .gene-flank .control-input {
+  width: 96px;
+  padding: 10px 6px;
+}
+
+/* SearchSelect: a text box that lists every option when focused. */
+.search-select {
+  position: relative;
+}
+
+.search-select .control-input {
+  padding-right: 28px;
+  text-overflow: ellipsis;
+}
+
+.search-select-arrow {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  color: #888;
+  pointer-events: none;
+}
+
+.search-select-list {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 2px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 14px;
+}
+
+.search-select-list li {
+  padding: 6px 12px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.search-select-list li.selected {
+  font-weight: 600;
+}
+
+.search-select-list li.active {
+  background: #e8f0fb;
+}
+
+.search-select-list li.search-select-empty {
+  color: #666;
+  cursor: default;
+}
+
+.search-select-list li.disabled {
+  color: #999;
+  cursor: not-allowed;
+}
+
+.app.dark-mode .search-select-list {
+  background: #1a1a1a;
+  border-color: #444;
+}
+
+.app.dark-mode .search-select-list li.active {
+  background: #24344d;
+}
+
+.app.dark-mode .search-select-list li.search-select-empty {
+  color: #aaa;
+}
+
+/* The local gfaidx command for a query too large for the server. */
+.gfaidx-command {
+  margin-top: 8px;
+  white-space: normal;
+}
+
+.gfaidx-command-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.gfaidx-command-line code {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  color: #333;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.app.dark-mode .gfaidx-command-line code {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e0e0e0;
+}
+
+.gfaidx-command-line button {
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .view-switch {
@@ -1584,7 +1811,10 @@ canvas {
   position: absolute;
   z-index: 20;
   left: 0;
-  right: 0;
+  /* At least the box's width, wider if a gene's coordinates need it. */
+  min-width: 100%;
+  width: max-content;
+  box-sizing: border-box;
   margin: 2px 0 0;
   padding: 4px 0;
   list-style: none;

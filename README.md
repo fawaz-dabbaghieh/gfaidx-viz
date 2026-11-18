@@ -18,14 +18,20 @@ drawing run in your browser. You can also open your own GFA files directly.
 
 Pick one of the indexed graphs hosted on the server, then extract a subgraph:
 
-- **Coordinate region**: a range on a reference path, e.g.
-  `CHM13 chr1:1,000,000-1,010,000`. Optionally include all haplotypes that
-  pass through it.
-- **Find a gene**: type a gene name, e.g. `BRCA1`, to fill in its GRCh38 or
-  CHM13 region plus a flank.
+- **Coordinate region**: a range on a coordinate track, typed as
+  `name:start-end`, e.g. `chr1:103642902-103751695`, or with a path name such
+  as `CHM13#0#chr1:103642902-103751695`. Optionally include all haplotypes
+  that pass through it.
+- **Gene name**: type a gene name, e.g. `AMY1C`, to get its GRCh38 or CHM13
+  region plus a flank.
 - **Node neighborhood**: the nodes around a starting node, up to a size limit.
-- **From a BED file**: load a BED/TSV of regions and pick one to fill in the
-  coordinates.
+- **BED file**: load a BED/TSV of regions and pick one to fill in the
+  region.
+
+The app opens with an example ready to run: the amylase locus (AMY1C, plus
+50 kb either side) on the HPRC release 2 Minigraph-Cactus CHM13 graph. If a
+result is too large for the server or the browser, the app shows the `gfaidx`
+command that extracts it from a downloaded copy of the indexed graph.
 
 ![The Query tab](docs/images/query.png)
 
