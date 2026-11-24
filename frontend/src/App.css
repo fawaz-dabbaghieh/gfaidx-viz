@@ -111,11 +111,18 @@ body:has(.app.dark-mode) {
   font-weight: normal;
 }
 
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+
 .header-links {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-left: auto;
   font-size: 14px;
 }
 
@@ -138,6 +145,28 @@ body:has(.app.dark-mode) {
 
 .app.dark-mode .header-links a:hover {
   color: #7fb2ff;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  padding: 5px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: #333;
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+.app.dark-mode .theme-toggle {
+  color: #ddd;
+}
+
+.app.dark-mode .theme-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 /* Menu Bar */
@@ -201,38 +230,71 @@ body:has(.app.dark-mode) {
 .load-error-banner {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 12px;
   margin: 0 0 15px 0;
-  padding: 10px 12px;
+  padding: 12px 14px;
   background: #fff2f2;
   border: 1px solid #f0b4b4;
   color: #9b1c1c;
+  font-size: 15px;
+  scroll-margin: 12px;
 }
 
-.load-error-banner pre {
-  margin: 0;
+.load-error-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.load-error-message {
+  font-weight: 500;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
+}
+
+.load-error-local {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .load-error-banner button,
 .load-error-banner a {
-  padding: 4px 8px;
+  padding: 4px 10px;
   border: 1px solid #d78c8c;
   background: white;
   color: #9b1c1c;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
 }
 
-/* Keeps the download link next to Dismiss on the right. */
-.load-error-banner a {
-  margin-left: auto;
+/* The actions that get the data: the result itself, or the indexed graph. */
+.load-error-banner .load-error-action {
+  display: inline-block;
+  padding: 6px 14px;
+  border-color: #2563eb;
+  background: #2563eb;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
   text-decoration: none;
   white-space: nowrap;
+}
+
+.load-error-banner .load-error-action:hover {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+}
+
+.load-error-banner .gfaidx-command-line {
+  margin-top: 0;
+}
+
+.load-error-banner .gfaidx-command-line code {
+  font-size: 13px;
 }
 
 .app.dark-mode .load-error-banner {
@@ -246,6 +308,17 @@ body:has(.app.dark-mode) {
   background: #2a2a2a;
   border-color: #704040;
   color: #ffb8b8;
+}
+
+.app.dark-mode .load-error-banner .load-error-action {
+  border-color: #3b82f6;
+  background: #3b82f6;
+  color: white;
+}
+
+.app.dark-mode .load-error-banner .load-error-action:hover {
+  border-color: #2563eb;
+  background: #2563eb;
 }
 
 .menu-item {
@@ -400,38 +473,6 @@ body:has(.app.dark-mode) {
 
 .app.dark-mode .dropdown-item-desc {
   color: #aaa;
-}
-
-.dropdown-checkbox-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  cursor: pointer;
-  font-size: 13px;
-  background: white;
-}
-
-.dropdown-checkbox-item:hover {
-  background: #f9f9f9;
-}
-
-.app.dark-mode .dropdown-checkbox-item {
-  background: #2a2a2a;
-  color: #e0e0e0;
-}
-
-.app.dark-mode .dropdown-checkbox-item:hover {
-  background: #4a4a4a;
-}
-
-.dropdown-checkbox-item input[type='checkbox'] {
-  margin: 0;
-  cursor: pointer;
-}
-
-.dropdown-checkbox-item span {
-  user-select: none;
 }
 
 .app-main {
@@ -651,12 +692,7 @@ body:has(.app.dark-mode) {
   color: #aaa;
 }
 
-/* The local gfaidx command for a query too large for the server. */
-.gfaidx-command {
-  margin-top: 8px;
-  white-space: normal;
-}
-
+/* A gfaidx command with a Copy button. */
 .gfaidx-command-line {
   display: flex;
   align-items: flex-start;
@@ -795,7 +831,6 @@ body:has(.app.dark-mode) {
   color: #b9d7f5;
 }
 
-.gfaidx-job-error,
 .layout-error {
   margin-top: 10px;
   padding: 10px;
@@ -811,12 +846,6 @@ body:has(.app.dark-mode) {
   margin: 0 0 10px;
 }
 
-.gfaidx-job-error a {
-  color: inherit;
-  font-weight: 600;
-}
-
-.app.dark-mode .gfaidx-job-error,
 .app.dark-mode .layout-error {
   border-color: #7a3b3b;
   background: #3a1f1f;
@@ -1365,6 +1394,39 @@ input[type='checkbox'] {
   cursor: not-allowed;
 }
 
+.graph-stats-button {
+  padding: 7px 11px;
+  border: 1px solid #ccc;
+  background: white;
+  color: #333;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.graph-stats-button:hover:not(:disabled) {
+  background: #f0f0f0;
+}
+
+.graph-stats-button:disabled {
+  color: #999;
+  cursor: not-allowed;
+}
+
+.app.dark-mode .graph-stats-button {
+  border-color: #555;
+  background: #3a3a3a;
+  color: #e0e0e0;
+}
+
+.app.dark-mode .graph-stats-button:hover:not(:disabled) {
+  background: #505050;
+}
+
+.app.dark-mode .graph-stats-button:disabled {
+  color: #777;
+}
+
 .node-locator-error {
   margin: -4px 0 10px;
   color: #b42318;
@@ -1594,6 +1656,153 @@ canvas {
 
 .app.dark-mode .length-distribution-readout {
   color: #aaa;
+}
+
+/* Download Indexed Graphs dialog */
+.download-graphs-dialog {
+  width: min(780px, calc(100vw - 32px));
+}
+
+.download-graphs-intro {
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+.app.dark-mode .download-graphs-intro a {
+  color: #7fb2ff;
+}
+
+.download-graphs-intro code,
+.download-graphs-dialog .control-error code {
+  font-size: 13px;
+}
+
+.download-graphs-steps {
+  margin: 0 0 18px;
+  padding-left: 22px;
+  line-height: 1.45;
+}
+
+.download-graphs-steps > li + li {
+  margin-top: 12px;
+}
+
+.download-graphs-note {
+  margin-top: 4px;
+  color: #666;
+  font-size: 13px;
+}
+
+.app.dark-mode .download-graphs-note {
+  color: #aaa;
+}
+
+.download-graphs-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+
+.download-graphs-list {
+  position: relative;
+  max-height: 300px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  list-style: none;
+}
+
+.app.dark-mode .download-graphs-list {
+  border-color: #444;
+}
+
+.download-graphs-list li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.download-graphs-list li:last-child {
+  border-bottom: none;
+}
+
+.download-graphs-list li.selected {
+  background: #e8f0fe;
+}
+
+.app.dark-mode .download-graphs-list li {
+  border-bottom-color: #383838;
+}
+
+.app.dark-mode .download-graphs-list li.selected {
+  background: #24344f;
+}
+
+.download-graphs-pick {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.download-graphs-name {
+  font-size: 14px;
+}
+
+.download-graphs-file {
+  overflow: hidden;
+  color: #666;
+  font-family: monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app.dark-mode .download-graphs-file {
+  color: #aaa;
+}
+
+.download-graphs-size {
+  color: #555;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.app.dark-mode .download-graphs-size {
+  color: #bbb;
+}
+
+.download-graphs-link {
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 4px;
+  color: #0066cc;
+}
+
+.download-graphs-link:hover {
+  background: rgba(0, 102, 204, 0.1);
+}
+
+.app.dark-mode .download-graphs-link {
+  color: #7fb2ff;
+}
+
+.download-graphs-empty {
+  padding: 10px;
+  color: #666;
+  font-size: 13px;
 }
 
 /* Click-selected node / connection details, to the right of the graph */

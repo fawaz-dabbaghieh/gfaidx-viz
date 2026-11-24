@@ -11,7 +11,10 @@ import {
 import { PathsLegend } from './components/PathsLegend'
 import { StatsPanel } from './components/StatsPanel'
 import { GraphExtractionControls } from './components/GraphExtractionControls'
+import { DownloadGraphsDialog } from './components/DownloadGraphsDialog'
 import { HeaderLinks } from './components/HeaderLinks'
+import { LoadErrorBanner } from './components/LoadErrorBanner'
+import { ThemeToggle } from './components/ThemeToggle'
 import { NodeStyleCsvPanel } from './components/NodeStyleCsvPanel'
 import { BandageLayoutWorker } from './utils/BandageLayoutWorker'
 import { parseGFA } from './utils/gfaParser'
@@ -30,9 +33,12 @@ import {
 } from './utils/builtInGenes'
 import { EXAMPLE_GRAPH_ID } from './utils/exampleQuery'
 import {
+  DEFAULT_HAPLOTYPE_GAP,
   gfaidxRegionCommand,
   gfaidxSubgraphCommand,
-  isServerSizeLimitError,
+  haplotypeGapError,
+  normalizeHaplotypeGap,
+  serverSizeLimitMessage,
 } from './utils/gfaidxCommand'
 import { clampZoom } from './utils/zoom'
 import {
@@ -177,8 +183,8 @@ function App({ worker, onStopLayout }: AppProps) {
   // or more (see runReferencePathRelax).
   const [layoutElapsedMs, setLayoutElapsedMs] = useState(0)
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
-  const [viewMenuOpen, setViewMenuOpen] = useState(false)
   const [statsDialogOpen, setStatsDialogOpen] = useState(false)
+  const [downloadGraphsOpen, setDownloadGraphsOpen] = useState(false)
   const [urlDialogOpen, setUrlDialogOpen] = useState(false)
   const [urlInput, setUrlInput] = useState('')
   const [loadingFile, setLoadingFile] = useState(false)
@@ -296,6 +302,7 @@ function App({ worker, onStopLayout }: AppProps) {
   const [subgraphStartNode, setSubgraphStartNode] = useState('')
   const [subgraphMaxNodes, setSubgraphMaxNodes] = useState('200')
   const [regionMaxNodes, setRegionMaxNodes] = useState('200')
+  const [regionHaplotypeGap, setRegionHaplotypeGap] = useState(DEFAULT_HAPLOTYPE_GAP)
   const [extractionWithCoords, setExtractionWithCoords] = useState(true)
   const [extractAllHaplotypes, setExtractAllHaplotypes] = useState(true)
   const [manualRegionReference, setManualRegionReference] = useState('')
@@ -946,12 +953,11 @@ function App({ worker, onStopLayout }: AppProps) {
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
 
-      const message =
+      const errorMessage =
         error instanceof Error ? error.message : 'Failed to extract subgraph'
-      if (
-        error instanceof GfaidxResultTooLargeError ||
-        isServerSizeLimitError(message)
-      ) {
+      const sizeLimitMessage = serverSizeLimitMessage(errorMessage)
+      const message = sizeLimitMessage ?? errorMessage
+      if (error instanceof GfaidxResultTooLargeError || sizeLimitMessage) {
         setOversizedResult({
           message,
           downloadUrl:
@@ -983,6 +989,7 @@ function App({ worker, onStopLayout }: AppProps) {
     const start = parseCoordinateInput(regionStart)
     const end = parseCoordinateInput(regionEnd)
     const maxNodes = Number(regionMaxNodes)
+    const haplotypeGap = normalizeHaplotypeGap(regionHaplotypeGap)
 
     if (!selectedIndexedGraph || !selectedGraphSupportsExtraction) {
       setLoadError('Choose an indexed graph before extracting a region')
@@ -1025,6 +1032,12 @@ function App({ worker, onStopLayout }: AppProps) {
       return
     }
 
+    const gapError = extractAllHaplotypes ? haplotypeGapError(haplotypeGap) : null
+    if (gapError) {
+      setLoadError(gapError)
+      return
+    }
+
     try {
       setLoadError(null)
 
@@ -1039,6 +1052,7 @@ function App({ worker, onStopLayout }: AppProps) {
           max_nodes: extractAllHaplotypes ? undefined : maxNodes,
           with_coords: extractionWithCoords,
           all_haplotypes: extractAllHaplotypes,
+          haplotype_gap: extractAllHaplotypes ? haplotypeGap : undefined,
         },
       )
       const referencePrefix = reference
@@ -1056,12 +1070,11 @@ function App({ worker, onStopLayout }: AppProps) {
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
 
-      const message =
+      const errorMessage =
         error instanceof Error ? error.message : 'Failed to extract region'
-      if (
-        error instanceof GfaidxResultTooLargeError ||
-        isServerSizeLimitError(message)
-      ) {
+      const sizeLimitMessage = serverSizeLimitMessage(errorMessage)
+      const message = sizeLimitMessage ?? errorMessage
+      if (error instanceof GfaidxResultTooLargeError || sizeLimitMessage) {
         setOversizedResult({
           message,
           downloadUrl:
@@ -1073,6 +1086,7 @@ function App({ worker, onStopLayout }: AppProps) {
             start,
             end,
             allHaplotypes: extractAllHaplotypes,
+            haplotypeGap,
             maxNodes,
             withCoords: extractionWithCoords,
           }),
@@ -1087,6 +1101,7 @@ function App({ worker, onStopLayout }: AppProps) {
     manualRegionReference,
     manualRegionSequence,
     regionEnd,
+    regionHaplotypeGap,
     regionMaxNodes,
     regionPaths,
     regionStart,
@@ -1526,7 +1541,7 @@ function App({ worker, onStopLayout }: AppProps) {
 
   // Close dropdown when clicking outside
   useEffect(() => {
-    if (!fileMenuOpen && !viewMenuOpen) return
+    if (!fileMenuOpen) return
 
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -1534,13 +1549,12 @@ function App({ worker, onStopLayout }: AppProps) {
         !(e.target as Element).closest('.dropdown-item')
       ) {
         setFileMenuOpen(false)
-        setViewMenuOpen(false)
       }
     }
 
     document.addEventListener('click', handleClickOutside)
     return () => document.removeEventListener('click', handleClickOutside)
-  }, [fileMenuOpen, viewMenuOpen])
+  }, [fileMenuOpen])
 
   // Close dialog with Escape key
   useEffect(() => {
@@ -1571,6 +1585,9 @@ function App({ worker, onStopLayout }: AppProps) {
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
   }, [urlDialogOpen])
+
+  const showDownloadGraphs = useCallback(() => setDownloadGraphsOpen(true), [])
+  const closeDownloadGraphs = useCallback(() => setDownloadGraphsOpen(false), [])
 
   // Save dark mode preference to localStorage
   useEffect(() => {
@@ -1620,37 +1637,6 @@ function App({ worker, onStopLayout }: AppProps) {
               )}
             </div>
 
-            <div className="menu-item">
-              <button
-                className="menu-button"
-                onClick={() => setViewMenuOpen(!viewMenuOpen)}
-              >
-                View
-              </button>
-              {viewMenuOpen && (
-                <div className="dropdown-menu">
-                  <button
-                    className="dropdown-item"
-                    onClick={() => {
-                      setStatsDialogOpen(true)
-                      setViewMenuOpen(false)
-                    }}
-                    disabled={!currentGraph}
-                  >
-                    Statistics
-                  </button>
-                  <label className="dropdown-checkbox-item">
-                    <input
-                      type="checkbox"
-                      checked={isDarkMode}
-                      onChange={e => setIsDarkMode(e.target.checked)}
-                    />
-                    <span>Dark Mode</span>
-                  </label>
-                </div>
-              )}
-            </div>
-
             <button
               className="menu-button menu-button-accent"
               onClick={handleDownloadGfa}
@@ -1688,26 +1674,31 @@ function App({ worker, onStopLayout }: AppProps) {
               </button>
             </form>
           )}
-          <HeaderLinks />
+          <div className="header-actions">
+            <button
+              type="button"
+              className="menu-button header-download-button"
+              onClick={showDownloadGraphs}
+              title="Download the indexed graphs to query them locally with gfaidx"
+            >
+              Download Indexed Graphs
+            </button>
+            <HeaderLinks />
+            <ThemeToggle isDarkMode={isDarkMode} onChange={setIsDarkMode} />
+          </div>
         </div>
       </header>
 
-      {/* Surface file/backend load failures outside modal dialogs. Without this
-          banner, extraction errors are stored but easy for users to miss. */}
+      {/* The one place file and extraction errors are shown, outside modal
+          dialogs. */}
       {loadError && !urlDialogOpen && (
-        <div className="load-error-banner" role="alert">
-          <pre>{loadError}</pre>
-          {oversizedResultUrl && (
-            // A new tab keeps the viewer open if the backend shows the file
-            // inline instead of saving it (backends before the attachment fix).
-            <a href={oversizedResultUrl} target="_blank" rel="noopener noreferrer">
-              Download GFA
-            </a>
-          )}
-          <button type="button" onClick={() => setLoadError(null)}>
-            Dismiss
-          </button>
-        </div>
+        <LoadErrorBanner
+          message={loadError}
+          downloadUrl={oversizedResultUrl}
+          command={oversizedResultCommand}
+          onShowDownloadGraphs={showDownloadGraphs}
+          onDismiss={() => setLoadError(null)}
+        />
       )}
 
       <main className="app-main">
@@ -1748,6 +1739,8 @@ function App({ worker, onStopLayout }: AppProps) {
               onNodeMaxNodesChange={setSubgraphMaxNodes}
               regionMaxNodes={regionMaxNodes}
               onRegionMaxNodesChange={setRegionMaxNodes}
+              regionHaplotypeGap={regionHaplotypeGap}
+              onRegionHaplotypeGapChange={setRegionHaplotypeGap}
               withCoords={extractionWithCoords}
               onWithCoordsChange={setExtractionWithCoords}
               nodeStart={subgraphStartNode}
@@ -1769,9 +1762,6 @@ function App({ worker, onStopLayout }: AppProps) {
               onExtractRegion={handleExtractRegion}
               isExtracting={isExtractingSubgraph}
               jobProgress={gfaidxJobProgress}
-              extractionError={loadError}
-              extractionDownloadUrl={oversizedResultUrl}
-              extractionCommand={oversizedResultCommand}
               bedAnnotations={bedAnnotations}
               selectedBedAnnotation={selectedBedAnnotation}
               onBedAnnotationsChange={handleBedAnnotationsChange}
@@ -1935,6 +1925,15 @@ function App({ worker, onStopLayout }: AppProps) {
                 }
               >
                 Go to Node
+              </button>
+              <button
+                className="graph-stats-button"
+                type="button"
+                onClick={() => setStatsDialogOpen(true)}
+                disabled={!currentGraph}
+                title="Statistics of the loaded graph"
+              >
+                Statistics
               </button>
             </form>
           </div>
@@ -2170,6 +2169,14 @@ function App({ worker, onStopLayout }: AppProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {downloadGraphsOpen && (
+        <DownloadGraphsDialog
+          graphs={indexedGraphs}
+          selectedGraphId={selectedIndexedGraph}
+          onClose={closeDownloadGraphs}
+        />
       )}
 
       {/* Statistics Dialog */}

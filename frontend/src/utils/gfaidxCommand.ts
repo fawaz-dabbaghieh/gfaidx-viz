@@ -2,8 +2,27 @@
 // result is too large for the server or the browser. It mirrors the flags
 // the backend adds (see gfaidxCommand in the MMseqs2-App backend).
 
-// The backend's default --haplotype_gap for all-haplotype queries.
-const BACKEND_HAPLOTYPE_GAP = '10kb'
+// The backend's default --haplotype_gap for all-haplotype queries, and its
+// cap on a chosen one (gfaidxMaxHaplotypeGapBases).
+export const DEFAULT_HAPLOTYPE_GAP = '10kb'
+const MAX_HAPLOTYPE_GAP_BASES = 1_000_000
+const HAPLOTYPE_GAP = /^(0|[1-9][0-9]*)(bp|kb|mb|gb)?$/i
+const GAP_UNIT_BASES: Record<string, number> = { '': 1, bp: 1, kb: 1e3, mb: 1e6, gb: 1e9 }
+
+// "10 kb" or "10,000" -> the form the backend accepts ("10kb", "10000");
+// empty means the default.
+export function normalizeHaplotypeGap(gap: string): string {
+  return gap.replace(/[\s,]+/g, '') || DEFAULT_HAPLOTYPE_GAP
+}
+
+export function haplotypeGapError(gap: string): string | null {
+  const match = HAPLOTYPE_GAP.exec(gap)
+  if (!match) return 'Haplotype gap must be a number of bases, e.g. 10kb or 5000'
+  const bases = Number(match[1]) * (GAP_UNIT_BASES[(match[2] ?? '').toLowerCase()] ?? 1)
+  return bases > MAX_HAPLOTYPE_GAP_BASES
+    ? 'Haplotype gap must be at most 1mb on the server'
+    : null
+}
 
 // Quotes anything a shell could expand; "#" in PanSN names is a glob
 // operator under zsh's extended_glob.
@@ -24,6 +43,7 @@ export function gfaidxRegionCommand(query: {
   start: number
   end: number
   allHaplotypes: boolean
+  haplotypeGap: string
   maxNodes: number
   withCoords: boolean
 }): string {
@@ -35,7 +55,7 @@ export function gfaidxRegionCommand(query: {
     outputName(query.sequence, query.start, query.end),
   ]
   if (query.allHaplotypes) {
-    args.push('--mode', 'all', '--haplotype_gap', BACKEND_HAPLOTYPE_GAP)
+    args.push('--mode', 'all', '--haplotype_gap', query.haplotypeGap)
   } else {
     args.push('--mode', 'bfs', '--max_nodes', String(query.maxNodes))
   }
@@ -63,7 +83,13 @@ export function gfaidxSubgraphCommand(query: {
   return args.map(shellArg).join(' ')
 }
 
-// The backend's error when gfaidx's output passes its size limit.
-export function isServerSizeLimitError(message: string): boolean {
-  return /exceeded the \d+ MB server limit/.test(message)
+// The backend's error when gfaidx's output passes its size limit, reworded
+// for the app (it suggests no_paths, which the app has no option for).
+// Null for any other error.
+export function serverSizeLimitMessage(message: string): string | null {
+  const match = /exceeded the (\d+) MB server limit/.exec(message)
+  return match
+    ? `The subgraph is over the server's ${match[1]} MB limit. Try a ` +
+        'smaller region, Max Nodes or Haplotype Gap.'
+    : null
 }

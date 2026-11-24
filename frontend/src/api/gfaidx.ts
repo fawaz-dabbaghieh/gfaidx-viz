@@ -177,9 +177,12 @@ export async function runGfaidxJob({
   if (resultResponse.status === 413) {
     // The backend explains the sizes before ';' and how to fetch the file
     // after it; the UI offers that download itself, so only the sizes are kept.
-    const reason = (await readBackendError(resultResponse)).split(';')[0]
+    const reason = (await readBackendError(resultResponse)).split(';')[0] ?? ''
+    const sizes = /result is (\d+) MB, larger than the (\d+) MB/.exec(reason)
     throw new GfaidxResultTooLargeError(
-      `${reason}, so it cannot be displayed here. Use the download link to save it.`,
+      sizes
+        ? `The subgraph is ${sizes[1]} MB, more than the ${sizes[2]} MB that can be shown here.`
+        : `${reason}.`,
       `${resultUrl}?download=true`,
     )
   }

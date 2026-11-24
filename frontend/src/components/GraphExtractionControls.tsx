@@ -12,6 +12,7 @@ import {
   EXAMPLE_GENE,
   EXAMPLE_GENE_ASSEMBLY,
 } from '../utils/exampleQuery'
+import { DEFAULT_HAPLOTYPE_GAP } from '../utils/gfaidxCommand'
 import { formatRegion, parseRegion, REGION_EXAMPLE } from '../utils/regionText'
 import { BedAnnotationPanel } from './BedAnnotationPanel'
 import { GeneSearch } from './GeneSearch'
@@ -60,6 +61,8 @@ interface GraphExtractionControlsProps {
   onNodeMaxNodesChange: (value: string) => void
   regionMaxNodes: string
   onRegionMaxNodesChange: (value: string) => void
+  regionHaplotypeGap: string
+  onRegionHaplotypeGapChange: (value: string) => void
   withCoords: boolean
   onWithCoordsChange: (enabled: boolean) => void
   nodeStart: string
@@ -88,14 +91,6 @@ interface GraphExtractionControlsProps {
   onExtractRegion: () => void
   isExtracting: boolean
   jobProgress: GfaidxJobProgress | null
-  // Shown right by the submit button, not just in the page-level banner -
-  // users who scrolled down past the header were missing extraction
-  // failures entirely otherwise.
-  extractionError: string | null
-  // Set when the extraction finished but is too large to display.
-  extractionDownloadUrl: string | null
-  // The gfaidx command to run the failed query locally, when it was too large.
-  extractionCommand: string | null
   bedAnnotations: BedAnnotation[]
   selectedBedAnnotation: BedAnnotation | null
   onBedAnnotationsChange: (annotations: BedAnnotation[]) => void
@@ -140,6 +135,8 @@ export function GraphExtractionControls({
   onNodeMaxNodesChange,
   regionMaxNodes,
   onRegionMaxNodesChange,
+  regionHaplotypeGap,
+  onRegionHaplotypeGapChange,
   withCoords,
   onWithCoordsChange,
   nodeStart,
@@ -161,9 +158,6 @@ export function GraphExtractionControls({
   onExtractRegion,
   isExtracting,
   jobProgress,
-  extractionError,
-  extractionDownloadUrl,
-  extractionCommand,
   bedAnnotations,
   selectedBedAnnotation,
   onBedAnnotationsChange,
@@ -189,7 +183,6 @@ export function GraphExtractionControls({
   }, [isExtracting])
   const [extractionMode, setExtractionMode] =
     useState<ExtractionMode>('region')
-  const [commandCopied, setCommandCopied] = useState(false)
   const selectedRegionPath = regionPaths[selectedRegionPathIndex]
   const controlsDisabled =
     isExtracting ||
@@ -280,17 +273,7 @@ export function GraphExtractionControls({
     regionInputsDisabled || 'error' in parsedRegion
   const submitDisabled =
     extractionMode === 'neighborhood' ? controlsDisabled : regionSubmitDisabled
-  const submitLabel = isExtracting
-    ? 'Extracting...'
-    : extractionMode === 'neighborhood'
-      ? 'Extract Node Subgraph'
-      : allHaplotypes
-        ? 'Extract All Haplotypes'
-        : 'Extract Region'
-
-  useEffect(() => {
-    setCommandCopied(false)
-  }, [extractionCommand])
+  const submitLabel = isExtracting ? 'Extracting...' : 'Extract Subgraph'
 
   const regionField = (
     <div className="control-group query-main-field">
@@ -615,6 +598,32 @@ export function GraphExtractionControls({
                       <span>BFS</span>
                     </label>
                   </div>
+                  {allHaplotypes && (
+                    <label className="query-option">
+                      Haplotype Gap
+                      <HelpIcon
+                        text={
+                          'In repeats, a haplotype can pass through the ' +
+                          'region at distant places. It is split where more ' +
+                          'than this much of its sequence lies between two ' +
+                          'reference nodes of the region, and the part in ' +
+                          `between is left out. Bases, or bp/kb/mb; default ${DEFAULT_HAPLOTYPE_GAP}, ` +
+                          'at most 1mb.'
+                        }
+                      />
+                      <input
+                        className="control-input query-option-number"
+                        type="text"
+                        spellCheck={false}
+                        value={regionHaplotypeGap}
+                        placeholder={DEFAULT_HAPLOTYPE_GAP}
+                        onChange={event =>
+                          onRegionHaplotypeGapChange(event.currentTarget.value)
+                        }
+                        disabled={controlsDisabled}
+                      />
+                    </label>
+                  )}
                   {!allHaplotypes && (
                     <label className="query-option">
                       Max Nodes
@@ -678,44 +687,6 @@ export function GraphExtractionControls({
                 {submitLabel}
               </button>
             </div>
-            {extractionError && (
-              <div className="gfaidx-job-error" role="alert">
-                {extractionError}
-                {extractionDownloadUrl && (
-                  <div>
-                    <a
-                      href={extractionDownloadUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Download GFA
-                    </a>
-                  </div>
-                )}
-                {extractionCommand && (
-                  <div className="gfaidx-command">
-                    <div>
-                      To extract it on your own machine, download the indexed
-                      graph and run:
-                    </div>
-                    <div className="gfaidx-command-line">
-                      <code>{extractionCommand}</code>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard
-                            .writeText(extractionCommand)
-                            .then(() => setCommandCopied(true))
-                            .catch(() => setCommandCopied(false))
-                        }}
-                      >
-                        {commandCopied ? 'Copied' : 'Copy'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </>
         )}
       </form>
