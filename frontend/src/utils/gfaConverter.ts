@@ -50,6 +50,29 @@ function parsePanSNName(name: string): {
   return { sampleName: '', haplotypeIndex: '', sequenceName: name }
 }
 
+// gfaidx names each P-line of a "With Coordinates" extraction
+// "<sequence>:<start>-<end>" (0-based, end-exclusive), e.g.
+// "CHM13#0#chr1:103691893-103702700". Without coordinates the numbers can be
+// step positions instead, so the caller decides whether to trust them, and
+// the range must also be exactly as long as the path's sequence.
+const PATH_NAME_RANGE = /^(.+):(\d+)-(\d+)$/
+
+function walkFromPathNameRange(
+  name: string,
+  pathLength: number,
+): GraphWalkMetadata | undefined {
+  const match = PATH_NAME_RANGE.exec(name)
+  if (!match || Number(match[3]) - Number(match[2]) !== pathLength) {
+    return undefined
+  }
+  return {
+    ...parsePanSNName(match[1]!),
+    sequenceStart: match[2]!,
+    sequenceEnd: match[3]!,
+    tags: [],
+  }
+}
+
 // minigraph-style rGFA graphs tag each backbone segment with SN (reference
 // sequence name), SO (0-based offset on that sequence), and SR (rank; 0 means
 // the segment is on the reference backbone itself) instead of encoding an
@@ -118,6 +141,9 @@ function synthesizeRGFAReferencePaths(
 export function convertGFAToGraph(
   gfaGraph: GFAGraph,
   name: string = 'Imported GFA',
+  // Only for gfaidx "With Coordinates" results: read P-line names as
+  // coordinate ranges (see walkFromPathNameRange).
+  pathNameCoordinates: boolean = false,
 ): Graph {
   // The app renders oriented nodes explicitly, so the converter expands each
   // GFA segment into + / - strand-specific node ids as needed by the links.
@@ -229,22 +255,32 @@ export function convertGFAToGraph(
     return uniqueName
   }
 
+  const segmentLengths = pathNameCoordinates
+    ? new Map(gfaGraph.nodes.map(node => [node.id, node.length]))
+    : null
+
   for (const gfaPath of gfaGraph.paths) {
     // Parse path string (format: node1+,node2-,node3+,...)
     const pathSegments = gfaPath.path.split(',')
     const nodeIds: string[] = []
+    let pathLength = 0
 
     for (const segment of pathSegments) {
       const strand = segment.slice(-1) // Last character is the strand
       const nodeName = segment.slice(0, -1) // Everything except last character
       nodeIds.push(internNodeId(`${nodeName}${strand}`))
+      if (segmentLengths) pathLength += segmentLengths.get(nodeName) ?? NaN
     }
 
     paths.push({
       name: uniquePathName(gfaPath.name),
       nodeIds,
       recordType: gfaPath.recordType,
-      walk: gfaPath.walk,
+      walk:
+        gfaPath.walk ??
+        (segmentLengths && gfaPath.recordType === 'P'
+          ? walkFromPathNameRange(gfaPath.name, pathLength)
+          : undefined),
     })
   }
 

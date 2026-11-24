@@ -21,7 +21,9 @@ Pick one of the indexed graphs hosted on the server, then extract a subgraph:
 - **Coordinate region**: a range on a coordinate track, typed as
   `name:start-end`, e.g. `chr1:103642902-103751695`, or with a path name such
   as `CHM13#0#chr1:103642902-103751695`. Optionally include all haplotypes
-  that pass through it.
+  that pass through it; the haplotype gap (default 10 kb) sets where a
+  haplotype that passes through the region at distant places, such as in
+  repeats, is split.
 - **Gene name**: type a gene name, e.g. `AMY1C`, to get its GRCh38 or CHM13
   region plus a flank.
 - **Node neighborhood**: the nodes around a starting node, up to a size limit.
@@ -32,6 +34,9 @@ The app opens with an example ready to run: the amylase locus (AMY1C, plus
 50 kb either side) on the HPRC release 2 Minigraph-Cactus CHM13 graph. If a
 result is too large for the server or the browser, the app shows the `gfaidx`
 command that extracts it from a downloaded copy of the indexed graph.
+**Download Indexed Graphs**, at the top right, lists every indexed graph in
+the public bucket `s3://steineggerlab/gfaidx/` with its size, a download
+link, and the commands to fetch and unpack it.
 Results of up to 10,000 nodes are laid out straight away; larger ones wait
 for you to press Compute Layout.
 
@@ -96,8 +101,8 @@ edge to widen it for long path names.
 
 ### Graph statistics
 
-Node and edge counts, total length, node length summary, and a length
-histogram. It switches to a log scale when node lengths span several orders of
+The Statistics button next to Go to Node shows node and edge counts, total
+length, node length summary, and a length histogram. It switches to a log scale when node lengths span several orders of
 magnitude.
 
 ![The statistics dialog](docs/images/statistics.png)

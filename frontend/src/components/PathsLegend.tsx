@@ -220,7 +220,7 @@ const PathListRow = memo(function PathListRow({
           }}
         >
           <strong style={{ color: isDarkMode ? '#ddd' : '#444' }}>
-            W
+            {path.recordType === 'P' ? 'P' : 'W'}
           </strong>
           <span>Sample: {path.walk.sampleName}</span>
           <span>Haplotype: {path.walk.haplotypeIndex}</span>

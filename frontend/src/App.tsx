@@ -681,6 +681,9 @@ function App({ worker, onStopLayout }: AppProps) {
       filename: string,
       source: 'browser' | 'backend-extraction' = 'browser',
       ticket?: string,
+      // A gfaidx "With Coordinates" result, whose P-line names carry
+      // coordinate ranges. Never assumed for uploaded files.
+      withCoords: boolean = false,
       // Only set for a coordinate-region extraction: identifies the
       // path/walk the user actually queried, so it can become the linear
       // layout backbone automatically instead of forcing another manual
@@ -693,7 +696,7 @@ function App({ worker, onStopLayout }: AppProps) {
         setLinearLayoutFallbackWarning(null)
 
         const gfaGraph = parseGFA(text)
-        const graph = convertGFAToGraph(gfaGraph, filename)
+        const graph = convertGFAToGraph(gfaGraph, filename, withCoords)
 
         if (source === 'browser') {
           const localGraphId = `${LOCAL_GRAPH_ID_PREFIX}${filename}`
@@ -719,11 +722,16 @@ function App({ worker, onStopLayout }: AppProps) {
 
         // rGFA region paths come back as one full PanSN sequence name with no
         // reference (e.g. "GRCh38#0#chr1"), which is exactly the name of the
-        // path synthesized from the segments' SN/SO tags.
+        // path synthesized from the segments' SN/SO tags. PGGB P-lines add
+        // the extracted range to that name ("CHM13#0#chr1:103691893-...").
         const queriedPath = regionQuery
           ? graph.paths?.find(
               path =>
                 path.name === regionQuery.sequence ||
+                (path.recordType === 'P' &&
+                  path.walk !== undefined &&
+                  path.name ===
+                    `${regionQuery.sequence}:${path.walk.sequenceStart}-${path.walk.sequenceEnd}`) ||
                 (path.walk?.sequenceName === regionQuery.sequence &&
                   (!regionQuery.reference ||
                     path.walk?.sampleName === regionQuery.reference)),
@@ -949,6 +957,7 @@ function App({ worker, onStopLayout }: AppProps) {
         `${selectedIndexedGraph}_${startNode}_${maxNodes}_nodes${coordinateSuffix}.gfa`,
         'backend-extraction',
         ticket,
+        extractionWithCoords,
       )
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
@@ -1065,6 +1074,7 @@ function App({ worker, onStopLayout }: AppProps) {
         `${selectedIndexedGraph}_${referencePrefix}${sequence}_${start}_${end}${modeSuffix}${coordinateSuffix}.gfa`,
         'backend-extraction',
         ticket,
+        extractionWithCoords,
         { reference, sequence },
       )
     } catch (error) {
