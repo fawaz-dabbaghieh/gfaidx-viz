@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import type { GraphNode } from '../types'
+import { BUBBLE_TYPE_LABELS, type Bubble, bubbleId } from '../utils/bubbleGun'
 import type { EdgePathGroup } from '../utils/displayGraph'
 import type { GeneRecord } from '../utils/geneTrackBed'
 
@@ -10,6 +11,8 @@ export type SelectionInfo =
       sequencePreview: string | null
       csvMetadata?: Record<string, string>
       paths: { name: string; count: number }[]
+      // Null until bubble detection has finished on this graph.
+      bubbles: { nesting: Bubble[]; endOf: Bubble[] } | null
     }
   | {
       kind: 'edge'
@@ -44,6 +47,8 @@ interface SelectionInfoPanelProps {
   getPathColor: (pathName: string) => string
   isPathVisible: (pathName: string) => boolean
   onUseAsStartNode?: (nodeName: string) => void
+  highlightedBubble?: number | null
+  onHighlightBubble?: (bubbleIndex: number | null) => void
 }
 
 // One row per path; the "(N×)" suffix only appears for paths that cross the
@@ -79,6 +84,8 @@ export function SelectionInfoPanel({
   getPathColor,
   isPathVisible,
   onUseAsStartNode,
+  highlightedBubble = null,
+  onHighlightBubble,
 }: SelectionInfoPanelProps) {
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
@@ -162,6 +169,13 @@ export function SelectionInfoPanel({
                 Use as Start Node
               </button>
             )}
+            {selection.bubbles && (
+              <BubbleDetails
+                {...selection.bubbles}
+                highlightedBubble={highlightedBubble}
+                onHighlightBubble={onHighlightBubble}
+              />
+            )}
             {selection.paths.length > 0 && (
               <div className="selection-info-section">
                 <h5>Paths ({selection.paths.length})</h5>
@@ -218,6 +232,83 @@ export function SelectionInfoPanel({
         )}
       </aside>
     </>
+  )
+}
+
+// One row per bubble; clicking it highlights (or un-highlights) the bubble's
+// nodes in the graph.
+function BubbleRow({
+  bubble,
+  highlighted,
+  onHighlightBubble,
+}: {
+  bubble: Bubble
+  highlighted: boolean
+  onHighlightBubble?: (bubbleIndex: number | null) => void
+}) {
+  return (
+    <button
+      type="button"
+      className={`selection-bubble-row${highlighted ? ' highlighted' : ''}`}
+      aria-pressed={highlighted}
+      onClick={() => onHighlightBubble?.(highlighted ? null : bubble.index)}
+      title={highlighted ? 'Remove the highlight' : 'Highlight this bubble in the graph'}
+    >
+      <span className="selection-bubble-type">
+        {BUBBLE_TYPE_LABELS[bubble.type]} #{bubbleId(bubble)}
+      </span>
+      <span className="selection-bubble-ends">
+        {bubble.source} – {bubble.sink}
+      </span>
+      <span className="selection-bubble-size">
+        {bubble.inside.length.toLocaleString()} node
+        {bubble.inside.length === 1 ? '' : 's'} inside,{' '}
+        {bubble.insideBp.toLocaleString()} bp
+      </span>
+    </button>
+  )
+}
+
+function BubbleDetails({
+  nesting,
+  endOf,
+  highlightedBubble,
+  onHighlightBubble,
+}: {
+  nesting: Bubble[]
+  endOf: Bubble[]
+  highlightedBubble: number | null
+  onHighlightBubble?: (bubbleIndex: number | null) => void
+}) {
+  const row = (bubble: Bubble) => (
+    <BubbleRow
+      key={bubble.index}
+      bubble={bubble}
+      highlighted={bubble.index === highlightedBubble}
+      onHighlightBubble={onHighlightBubble}
+    />
+  )
+  return (
+    <div className="selection-info-section">
+      <h5>Bubbles</h5>
+      {nesting.length === 0 && endOf.length === 0 && (
+        <div className="selection-info-subtitle">Not in any bubble</div>
+      )}
+      {nesting.length > 0 && (
+        <>
+          <div className="selection-info-subtitle">
+            Inside {nesting.length}, innermost first
+          </div>
+          {nesting.map(row)}
+        </>
+      )}
+      {endOf.length > 0 && (
+        <>
+          <div className="selection-info-subtitle">End of {endOf.length}</div>
+          {endOf.map(row)}
+        </>
+      )}
+    </div>
   )
 }
 

@@ -9,6 +9,7 @@ import {
   SELECTION_INFO_PANEL_MIN_WIDTH,
 } from './components/SelectionInfoPanel'
 import { PathsLegend } from './components/PathsLegend'
+import { BubblesPanel } from './components/BubblesPanel'
 import { StatsPanel } from './components/StatsPanel'
 import { GraphExtractionControls } from './components/GraphExtractionControls'
 import { DownloadGraphsDialog } from './components/DownloadGraphsDialog'
@@ -17,6 +18,7 @@ import { LoadErrorBanner } from './components/LoadErrorBanner'
 import { ThemeToggle } from './components/ThemeToggle'
 import { NodeStyleCsvPanel } from './components/NodeStyleCsvPanel'
 import { BandageLayoutWorker } from './utils/BandageLayoutWorker'
+import { findBubbles, type BubbleSet } from './utils/bubbleGun'
 import { parseGFA } from './utils/gfaParser'
 import { convertGFAToGraph } from './utils/gfaConverter'
 import {
@@ -130,6 +132,7 @@ const CONTROL_TABS = [
   { id: 'query', label: 'Query' },
   { id: 'display', label: 'Display' },
   { id: 'paths', label: 'Paths' },
+  { id: 'bubbles', label: 'Bubbles' },
   { id: 'advanced', label: 'Advanced' },
   { id: 'styling', label: 'Styling' },
 ] as const
@@ -206,6 +209,22 @@ function App({ worker, onStopLayout }: AppProps) {
     ? oversizedResult.command
     : null
   const [currentGraph, setCurrentGraph] = useState<Graph | null>(null)
+  // Bubbles are kept with the graph they were found in, so a newly loaded
+  // graph never shows the previous one's.
+  const [bubbleResult, setBubbleResult] = useState<{
+    graph: Graph
+    bubbles: BubbleSet
+  } | null>(null)
+  const currentBubbles =
+    bubbleResult && bubbleResult.graph === currentGraph
+      ? bubbleResult.bubbles
+      : null
+  // Index into currentBubbles.bubbles, highlighted in the graph from the
+  // node info panel or the Bubbles tab; the tab also zooms to it.
+  const [highlightedBubble, setHighlightedBubble] = useState<number | null>(
+    null,
+  )
+  const [focusBubbleRequestId, setFocusBubbleRequestId] = useState(0)
   // The raw GFA text currentGraph was parsed from, kept only so "Download
   // GFA" can hand back exactly what was loaded rather than re-serializing
   // the parsed model (which could lose tags/fields it doesn't interpret).
@@ -361,6 +380,40 @@ function App({ worker, onStopLayout }: AppProps) {
   const handleCanvasZoomChange = useCallback((nextZoom: number) => {
     setDisplayZoom(clampZoom(nextZoom))
   }, [])
+
+  // Bubble detection takes milliseconds in its own worker, so it runs on
+  // every graph as soon as it is loaded.
+  useEffect(() => {
+    setHighlightedBubble(null)
+    if (!currentGraph) return
+    let current = true
+    findBubbles(currentGraph)
+      .then(bubbles => {
+        if (current) setBubbleResult({ graph: currentGraph, bubbles })
+      })
+      .catch(error => {
+        if (current) {
+          setLoadError(
+            `Bubble detection failed: ${error instanceof Error ? error.message : String(error)}`,
+          )
+        }
+      })
+    return () => {
+      current = false
+    }
+  }, [currentGraph])
+
+  const handleShowBubble = useCallback(
+    (bubbleIndex: number) => {
+      if (highlightedBubble === bubbleIndex) {
+        setHighlightedBubble(null)
+        return
+      }
+      setHighlightedBubble(bubbleIndex)
+      setFocusBubbleRequestId(id => id + 1)
+    },
+    [highlightedBubble],
+  )
 
   const handleLocateNode = useCallback(() => {
     const query = nodeLocatorInput.trim()
@@ -1838,6 +1891,16 @@ function App({ worker, onStopLayout }: AppProps) {
                 />
               )}
           </div>
+          <div hidden={controlTab !== 'bubbles'}>
+            <BubblesPanel
+              bubbles={currentBubbles}
+              graphName={currentGraph?.name ?? null}
+              isDarkMode={isDarkMode}
+              highlightedBubble={highlightedBubble}
+              onShowBubble={handleShowBubble}
+              onDownload={saveGfaTextAsFile}
+            />
+          </div>
           <div hidden={controlTab !== 'advanced'}>
             <AdvancedControls
               options={layoutOptions}
@@ -1905,6 +1968,18 @@ function App({ worker, onStopLayout }: AppProps) {
                     Paths/Walks:{' '}
                     {(currentGraph.paths?.length ?? 0).toLocaleString()}
                   </span>
+                  {currentBubbles && (
+                    <span
+                      title={`${currentBubbles.wasmMs.toFixed(1)} ms in BubbleGun2, ${currentBubbles.totalMs.toFixed(1)} ms in total`}
+                    >
+                      Bubbles:{' '}
+                      {currentBubbles.bubbles.length.toLocaleString()} (
+                      {currentBubbles.counts.simple.toLocaleString()} simple,{' '}
+                      {currentBubbles.counts.super.toLocaleString()} super,{' '}
+                      {currentBubbles.counts.insertion.toLocaleString()}{' '}
+                      insertions) in {Math.round(currentBubbles.totalMs)} ms
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -2017,6 +2092,10 @@ function App({ worker, onStopLayout }: AppProps) {
               geneTrackAnnotations={showGeneTrack ? activeGeneTrack : NO_GENES}
               geneTrackSource={geneTrackSource}
               copyNumberPathNames={copyNumberPathNames}
+              bubbles={currentBubbles}
+              highlightedBubble={highlightedBubble}
+              onHighlightBubble={setHighlightedBubble}
+              focusBubbleRequestId={focusBubbleRequestId}
               onUseAsStartNode={setSubgraphStartNode}
               infoPanelWidth={clampedInfoPanelWidth}
               infoPanelMaxWidth={maxInfoPanelWidth}
@@ -2209,6 +2288,7 @@ function App({ worker, onStopLayout }: AppProps) {
               <StatsPanel
                 graph={currentGraph}
                 layoutDuration={layoutDuration}
+                bubbles={currentBubbles}
               />
               <div className="stats-section">
                 <h3>Length Distribution</h3>

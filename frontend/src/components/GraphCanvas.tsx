@@ -31,6 +31,12 @@ import {
 } from './SelectionInfoPanel'
 import { clampZoom } from '../utils/zoom'
 import { type GeneRecord, stripPanSNPrefix } from '../utils/geneTrackBed'
+import {
+  BUBBLE_HIGHLIGHT_COLORS,
+  type BubbleNodeRole,
+  type BubbleSet,
+  bubblesAtNode,
+} from '../utils/bubbleGun'
 
 // A point in the reference-path coordinate ruler's piecewise-linear mapping
 // between a node's world-space x position and its base-pair offset along the
@@ -276,6 +282,15 @@ interface GraphCanvasProps {
   // Feature C (copy-number track): names of paths the user has toggled on in
   // the Paths legend, each drawn as its own colored line.
   copyNumberPathNames?: string[]
+  // Found automatically for every loaded graph: a clicked node lists the
+  // bubbles it is in, and one of them can be highlighted.
+  bubbles?: BubbleSet | null
+  // Index into bubbles.bubbles of the highlighted bubble, picked in the info
+  // panel or the Bubbles tab.
+  highlightedBubble?: number | null
+  onHighlightBubble?: (bubbleIndex: number | null) => void
+  // Bumped to zoom the view to the highlighted bubble.
+  focusBubbleRequestId?: number
   onUseAsStartNode?: (nodeId: string) => void
   // Sized by App, which also fits the canvas into whatever width is left.
   infoPanelWidth?: number
@@ -362,6 +377,10 @@ function GraphCanvasComponent({
   geneTrackAnnotations,
   geneTrackSource = null,
   copyNumberPathNames,
+  bubbles = null,
+  highlightedBubble = null,
+  onHighlightBubble,
+  focusBubbleRequestId = 0,
   onUseAsStartNode,
   infoPanelWidth = SELECTION_INFO_PANEL_DEFAULT_WIDTH,
   infoPanelMaxWidth = infoPanelWidth,
@@ -383,6 +402,7 @@ function GraphCanvasComponent({
   })
   const handledZoomRequestIdRef = useRef(zoomRequestId)
   const handledFocusRequestIdRef = useRef(focusNodeRequestId)
+  const handledBubbleFocusRequestIdRef = useRef(focusBubbleRequestId)
   const zoomReportFrameRef = useRef<number | null>(null)
   const pendingZoomReportRef = useRef<number | null>(null)
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
@@ -836,6 +856,63 @@ function GraphCanvasComponent({
     setTransform(nextTransform)
   }, [zoom, zoomRequestId, width, height])
 
+  // Centers the view on a graph-space box, zoomed so the box (times
+  // `context`, for some surroundings) fills the canvas, but never zoomed out
+  // past the whole-graph fit.
+  const focusViewOnBox = useCallback(
+    (
+      minX: number,
+      maxX: number,
+      minY: number,
+      maxY: number,
+      context: number,
+    ) => {
+      const nodeWidth = maxX - minX
+      const nodeHeight = maxY - minY
+      const rotation = transformRef.current.rotation
+      const rotationCosine = Math.cos(rotation)
+      const rotationSine = Math.sin(rotation)
+      // Project the box through the current rotation so focus scaling
+      // leaves similar surrounding context at every angle.
+      const rotatedNodeWidth =
+        Math.abs(nodeWidth * rotationCosine) +
+        Math.abs(nodeHeight * rotationSine)
+      const rotatedNodeHeight =
+        Math.abs(nodeWidth * rotationSine) +
+        Math.abs(nodeHeight * rotationCosine)
+      const focusWidth = Math.max(rotatedNodeWidth * context, 80)
+      const focusHeight = Math.max(rotatedNodeHeight * context, 80)
+      const availableWidth = Math.max(width - 160, width * 0.5)
+      const availableHeight = Math.max(height - 160, height * 0.5)
+      const focusScale = Math.min(
+        availableWidth / focusWidth,
+        availableHeight / focusHeight,
+      )
+      const nextScale = clampZoom(
+        Math.max(boundsRef.current?.fitScale ?? 0, focusScale),
+      )
+      const centerX = (minX + maxX) / 2
+      const centerY = (minY + maxY) / 2
+      // Rotate the graph-space box center before solving the translation
+      // that places it at the center of the canvas.
+      const rotatedCenterX =
+        (centerX * rotationCosine - centerY * rotationSine) * nextScale
+      const rotatedCenterY =
+        (centerX * rotationSine + centerY * rotationCosine) * nextScale
+      const nextTransform = {
+        scale: nextScale,
+        rotation,
+        translateX: width / 2 - rotatedCenterX,
+        translateY: height / 2 - rotatedCenterY,
+      }
+
+      transformRef.current = nextTransform
+      setTransform(nextTransform)
+      reportInternalZoom(nextScale)
+    },
+    [height, reportInternalZoom, width],
+  )
+
   useEffect(() => {
     if (!focusNodeId) return
     if (handledFocusRequestIdRef.current === focusNodeRequestId) return
@@ -863,61 +940,13 @@ function GraphCanvasComponent({
       maxY = Math.max(maxY, segment.y)
     })
 
-    const nodeWidth = maxX - minX
-    const nodeHeight = maxY - minY
-    const rotation = transformRef.current.rotation
-    const rotationCosine = Math.cos(rotation)
-    const rotationSine = Math.sin(rotation)
-    // Project the node's bounding box through the current rotation so focus
-    // scaling leaves similar surrounding context at every angle.
-    const rotatedNodeWidth =
-      Math.abs(nodeWidth * rotationCosine) +
-      Math.abs(nodeHeight * rotationSine)
-    const rotatedNodeHeight =
-      Math.abs(nodeWidth * rotationSine) +
-      Math.abs(nodeHeight * rotationCosine)
-    const focusWidth = Math.max(rotatedNodeWidth * 4, 80)
-    const focusHeight = Math.max(rotatedNodeHeight * 4, 80)
-    const availableWidth = Math.max(width - 160, width * 0.5)
-    const availableHeight = Math.max(height - 160, height * 0.5)
-    const focusScale = Math.min(
-      availableWidth / focusWidth,
-      availableHeight / focusHeight,
-    )
-    const nextScale = clampZoom(
-      Math.max(boundsRef.current?.fitScale ?? 0, focusScale),
-    )
-    const centerX = (minX + maxX) / 2
-    const centerY = (minY + maxY) / 2
-    // Rotate the graph-space node center before solving the translation that
-    // places it at the center of the canvas.
-    const rotatedCenterX =
-      (centerX * rotationCosine - centerY * rotationSine) * nextScale
-    const rotatedCenterY =
-      (centerX * rotationSine + centerY * rotationCosine) * nextScale
-    const nextTransform = {
-      scale: nextScale,
-      rotation,
-      translateX: width / 2 - rotatedCenterX,
-      translateY: height / 2 - rotatedCenterY,
-    }
-
-    transformRef.current = nextTransform
-    setTransform(nextTransform)
+    focusViewOnBox(minX, maxX, minY, maxY, 4)
     setSelectedNode(targetNode.representativeId)
     setSelectedEdgeKey(null)
     setSelectedGene(null)
     setHoveredNode(null)
     setHoveredEdge(null)
-    reportInternalZoom(nextScale)
-  }, [
-    displayGraph.nodes,
-    focusNodeId,
-    focusNodeRequestId,
-    height,
-    reportInternalZoom,
-    width,
-  ])
+  }, [displayGraph.nodes, focusNodeId, focusNodeRequestId, focusViewOnBox])
 
   const pathColors = useMemo(() => {
     const colors = new Map<string, string>()
@@ -991,6 +1020,47 @@ function GraphCanvasComponent({
     setSelectedEdgeKey(null)
     setSelectedGene(null)
   }, [visibleDisplayGraphTopology])
+
+  // The highlighted bubble's nodes, its two ends drawn apart from the rest.
+  const highlightedBubbleRoles = useMemo(() => {
+    const bubble =
+      highlightedBubble === null ? undefined : bubbles?.bubbles[highlightedBubble]
+    if (!bubble) return null
+    const roles = new Map<string, BubbleNodeRole>()
+    for (const name of bubble.inside) roles.set(name, 'inside')
+    roles.set(bubble.source, 'end')
+    roles.set(bubble.sink, 'end')
+    return roles
+  }, [bubbles, highlightedBubble])
+
+  // Zooms to the highlighted bubble when the Bubbles tab asks for it.
+  useEffect(() => {
+    if (handledBubbleFocusRequestIdRef.current === focusBubbleRequestId) return
+    handledBubbleFocusRequestIdRef.current = focusBubbleRequestId
+    if (!highlightedBubbleRoles) return
+
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    for (const displayNode of displayGraph.nodes) {
+      if (!highlightedBubbleRoles.has(displayNode.node.name)) continue
+      for (const segment of displayNode.segments) {
+        minX = Math.min(minX, segment.x)
+        maxX = Math.max(maxX, segment.x)
+        minY = Math.min(minY, segment.y)
+        maxY = Math.max(maxY, segment.y)
+      }
+    }
+    if (minX === Infinity) return
+
+    focusViewOnBox(minX, maxX, minY, maxY, 1.5)
+  }, [
+    displayGraph.nodes,
+    focusBubbleRequestId,
+    highlightedBubbleRoles,
+    focusViewOnBox,
+  ])
 
   // A different gene set or reference makes the clicked gene stale.
   useEffect(() => {
@@ -1915,6 +1985,14 @@ function GraphCanvasComponent({
         ctx.strokeStyle = isDarkMode ? '#ffd54f' : '#b45309'
         ctx.lineWidth = contigThickness + 8
         ctx.stroke()
+      } else {
+        const bubbleRole = highlightedBubbleRoles?.get(node.name)
+        if (bubbleRole) {
+          ctx.strokeStyle =
+            BUBBLE_HIGHLIGHT_COLORS[bubbleRole][isDarkMode ? 'dark' : 'light']
+          ctx.lineWidth = contigThickness + 6
+          ctx.stroke()
+        }
       }
 
       ctx.strokeStyle = `rgb(${color.join(',')})`
@@ -2435,6 +2513,7 @@ function GraphCanvasComponent({
     hoveredEdge,
     selectedNode,
     selectedEdgeKey,
+    highlightedBubbleRoles,
     isDarkMode,
     getNodeColor,
     displayGraph,
@@ -3120,7 +3199,8 @@ function GraphCanvasComponent({
   const handleMouseUp = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       // A click (not a pan) on a connection selects it for the info panel;
-      // on empty space it clears the panel. Nodes are selected on mousedown.
+      // on empty space it clears the panel and any highlighted bubble. Nodes
+      // are selected on mousedown.
       const pointerDown = pointerDownRef.current
       pointerDownRef.current = null
       if (
@@ -3134,13 +3214,14 @@ function GraphCanvasComponent({
         setSelectedEdgeKey(clickedEdge?.key ?? null)
         setSelectedNode(null)
         setSelectedGene(null)
+        if (!clickedEdge) onHighlightBubble?.(null)
       }
 
       setIsDragging(false)
       setIsDraggingNode(false)
       setDraggingNodeId(null)
     },
-    [draggingNodeId, hoveredEdge, displayGraph.edges],
+    [draggingNodeId, hoveredEdge, displayGraph.edges, onHighlightBubble],
   )
 
   const isPathVisible = useCallback(
@@ -3164,8 +3245,15 @@ function GraphCanvasComponent({
       sequencePreview: sequence ? formatSequencePreview(sequence) : null,
       csvMetadata: nodeCsvMetadata?.[displayNode.node.id],
       paths: countPathVisitsToNode(displayNode, graph.paths ?? []),
+      bubbles: bubbles ? bubblesAtNode(bubbles, displayNode.node.name) : null,
     }
-  }, [selectedNode, visibleDisplayGraphTopology, nodeCsvMetadata, graph.paths])
+  }, [
+    selectedNode,
+    visibleDisplayGraphTopology,
+    nodeCsvMetadata,
+    graph.paths,
+    bubbles,
+  ])
 
   const selectedEdgeInfo = useMemo((): SelectionInfo | null => {
     if (!selectedEdgeKey) return null
@@ -3513,6 +3601,8 @@ function GraphCanvasComponent({
         getPathColor={getPathColor}
         isPathVisible={isPathVisible}
         onUseAsStartNode={onUseAsStartNode}
+        highlightedBubble={highlightedBubble}
+        onHighlightBubble={onHighlightBubble}
       />
     </div>
   )

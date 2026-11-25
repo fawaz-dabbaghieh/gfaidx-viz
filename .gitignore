@@ -15,6 +15,7 @@ __pycache__/
 build/
 indexed_example/
 layout_wasm/.build/
+bubbles_wasm/.build/
 layout_wasm/thirdparty/ogdf/build-wasm/
 
 # Diagnostic reports (https://nodejs.org/api/report.html)

@@ -78,6 +78,20 @@ This will:
 2. Build Bandage Layout → `layout_wasm/.build/bandage-layout/`
 3. Copy outputs to `js/` directory
 
+### 3b. Build BubbleGun2 (bubble detection)
+
+Bubble detection uses [bubblegun2](https://github.com/fawaz-dabbaghieh/bubblegun2),
+a git submodule at `bubbles_wasm/bubblegun2`, compiled to WASM without its CLI
+or zlib:
+```bash
+git submodule update --init bubbles_wasm/bubblegun2
+conda activate graphviz-wasm
+./bubbles_wasm/build.sh
+```
+
+This builds into `bubbles_wasm/.build/` and copies `bubblegun.js` and
+`bubblegun.wasm` to `js/`, next to the worker `js/bubblegun.worker.js`.
+
 ### 4. Build Outputs
 
 After successful build, you should have:

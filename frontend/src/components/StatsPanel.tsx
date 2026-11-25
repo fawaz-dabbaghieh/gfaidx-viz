@@ -1,12 +1,19 @@
 import { getGraphStats } from '../utils/graphStats'
+import type { BubbleSet } from '../utils/bubbleGun'
 import type { Graph } from '../types'
 
 interface StatsPanelProps {
   graph: Graph
   layoutDuration: number | null
+  // Null while bubble detection is still running.
+  bubbles: BubbleSet | null
 }
 
-export function StatsPanel({ graph, layoutDuration }: StatsPanelProps) {
+export function StatsPanel({
+  graph,
+  layoutDuration,
+  bubbles,
+}: StatsPanelProps) {
   // Cached per graph in getGraphStats, so reopening the dialog is cheap.
   const stats = getGraphStats(graph)
 
@@ -65,6 +72,71 @@ export function StatsPanel({ graph, layoutDuration }: StatsPanelProps) {
           </div>
         )}
       </div>
+
+      <h3>Bubbles</h3>
+      {bubbles ? (
+        <div className="stats-grid">
+          <div className="stat-item">
+            <div className="stat-label">Bubbles</div>
+            <div className="stat-value">
+              {bubbles.bubbles.length.toLocaleString()}
+            </div>
+          </div>
+
+          <div className="stat-item">
+            <div className="stat-label">Simple Bubbles</div>
+            <div className="stat-value">
+              {bubbles.counts.simple.toLocaleString()}
+            </div>
+          </div>
+
+          <div className="stat-item">
+            <div className="stat-label">Superbubbles</div>
+            <div className="stat-value">
+              {bubbles.counts.super.toLocaleString()}
+            </div>
+          </div>
+
+          <div className="stat-item">
+            <div className="stat-label">Insertions</div>
+            <div className="stat-value">
+              {bubbles.counts.insertion.toLocaleString()}
+            </div>
+          </div>
+
+          <div className="stat-item">
+            <div className="stat-label">Nodes in Bubbles</div>
+            <div className="stat-value">
+              {formatPercent(bubbles.coveredNodes, bubbles.totalNodes)}
+            </div>
+          </div>
+
+          <div className="stat-item">
+            <div className="stat-label">Sequence in Bubbles</div>
+            <div className="stat-value">
+              {formatPercent(bubbles.coveredBp, bubbles.totalBp)}
+            </div>
+          </div>
+
+          <div className="stat-item">
+            <div className="stat-label">Max Nestedness</div>
+            <div className="stat-value">{bubbles.maxNestedness}</div>
+          </div>
+
+          <div className="stat-item">
+            <div className="stat-label">Detection Time</div>
+            <div className="stat-value">{bubbles.totalMs.toFixed(1)}ms</div>
+          </div>
+        </div>
+      ) : (
+        <div className="control-hint">Finding bubbles...</div>
+      )}
     </div>
   )
+}
+
+// Nodes or sequence that are an end or inside of any bubble.
+function formatPercent(part: number, total: number): string {
+  if (total === 0) return '0%'
+  return `${((part / total) * 100).toFixed(1)}%`
 }
