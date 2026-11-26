@@ -57,7 +57,8 @@ Tick each item once it is done and verified.
       linear one, so it can be found in a force-directed graph too. The gene
       track now needs the linear layout's reference coordinates; the walk
       index's reference offsets (`compareToReference().refOffset`) give the
-      node-to-coordinate mapping without it
+      node-to-coordinate mapping without it. Must work for rGFA graphs too,
+      through the reference walk rebuilt from the SN/SO tags
 - [ ] F2: per-haplotype coverage table for the selected gene (nodes, bp,
       fraction, max multiplicity, total visits) + `haplotype_gap` banner
 - [x] F3: reference-sharing table with orderings (shared sequence, total
@@ -97,6 +98,23 @@ Segments without a sequence ('*') can't be spelled, so say so instead.
       ("Download GFA"), haplotype TSV + FASTA in the Haplotypes tab, the
       bubble list TSV + JSON in the Bubbles tab, and a picked bubble's
       traversal TSV + FASTA under it
+
+## rGFA (minigraph) graphs
+
+No haplotype paths, only the reference rebuilt from the rank-0 segments'
+SN/SO tags, and each segment's rank (SR) and the assembly that first added
+it (SN).
+
+- [x] "rGFA Rank" color scheme: reference (rank 0) blue, other ranks on a
+      ramp by the order their assemblies were added (amber to magenta;
+      pale yellow to red in dark mode), with a legend
+- [x] A clear message instead of "T1 (reference) 100%" and other
+      one-haplotype results: bubble traversals, the Haplotypes tab, the
+      Haplotype Sharing legend; the node panel drops "Haplotypes: 1 of 1"
+- [x] An "All Haplotypes" region query on an rGFA returns only the rank-0
+      (reference) segments, since there are no haplotype paths to follow.
+      Tracks from segment tags (region-paths `source: "S"`) are now always
+      queried with BFS: All Haplotypes is disabled there, with a note
 
 ## Small fixes
 

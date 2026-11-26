@@ -21,7 +21,8 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { NodeStyleCsvPanel } from './components/NodeStyleCsvPanel'
 import { BandageLayoutWorker } from './utils/BandageLayoutWorker'
 import { findBubbles, type BubbleSet } from './utils/bubbleGun'
-import { getWalkIndex } from './utils/walkIndex'
+import { getRGFAMaxRank } from './utils/rgfaRank'
+import { getWalkIndex, noHaplotypesMessage } from './utils/walkIndex'
 import { parseGFA } from './utils/gfaParser'
 import { convertGFAToGraph } from './utils/gfaConverter'
 import {
@@ -1061,6 +1062,14 @@ function App({ worker, onStopLayout }: AppProps) {
     subgraphStartNode,
   ])
 
+  // A track gfaidx builds from an rGFA's segment tags (SN/SO; source "S",
+  // e.g. minigraph) has no haplotype paths behind it, so "All Haplotypes"
+  // would return only the reference segments: such tracks are always
+  // queried with BFS, while the choice is kept for the other graphs.
+  const regionTrackIsRGFA =
+    regionPaths[selectedRegionPathIndex]?.source === 'S'
+  const regionAllHaplotypes = extractAllHaplotypes && !regionTrackIsRGFA
+
   const handleExtractRegion = useCallback(async () => {
     const selectedRegionPath = regionPaths[selectedRegionPathIndex]
     const reference = selectedRegionPath?.reference ?? manualRegionReference.trim()
@@ -1100,7 +1109,7 @@ function App({ worker, onStopLayout }: AppProps) {
     }
 
     if (
-      !extractAllHaplotypes &&
+      !regionAllHaplotypes &&
       (!Number.isInteger(maxNodes) ||
         maxNodes < 1 ||
         maxNodes > GFAIDX_MAX_NODES)
@@ -1111,7 +1120,7 @@ function App({ worker, onStopLayout }: AppProps) {
       return
     }
 
-    const gapError = extractAllHaplotypes ? haplotypeGapError(haplotypeGap) : null
+    const gapError = regionAllHaplotypes ? haplotypeGapError(haplotypeGap) : null
     if (gapError) {
       setLoadError(gapError)
       return
@@ -1128,16 +1137,16 @@ function App({ worker, onStopLayout }: AppProps) {
           sequence,
           start,
           end,
-          max_nodes: extractAllHaplotypes ? undefined : maxNodes,
+          max_nodes: regionAllHaplotypes ? undefined : maxNodes,
           with_coords: extractionWithCoords,
-          all_haplotypes: extractAllHaplotypes,
-          haplotype_gap: extractAllHaplotypes ? haplotypeGap : undefined,
+          all_haplotypes: regionAllHaplotypes,
+          haplotype_gap: regionAllHaplotypes ? haplotypeGap : undefined,
         },
       )
       const referencePrefix = reference
         ? `${reference}_`
         : ''
-      const modeSuffix = extractAllHaplotypes ? '_all_haplotypes' : ''
+      const modeSuffix = regionAllHaplotypes ? '_all_haplotypes' : ''
       const coordinateSuffix = extractionWithCoords ? '_with_coords' : ''
       loadGFAFromText(
         gfaText,
@@ -1165,7 +1174,7 @@ function App({ worker, onStopLayout }: AppProps) {
             sequence,
             start,
             end,
-            allHaplotypes: extractAllHaplotypes,
+            allHaplotypes: regionAllHaplotypes,
             haplotypeGap,
             maxNodes,
             withCoords: extractionWithCoords,
@@ -1175,7 +1184,7 @@ function App({ worker, onStopLayout }: AppProps) {
       setLoadError(message)
     }
   }, [
-    extractAllHaplotypes,
+    regionAllHaplotypes,
     extractionWithCoords,
     loadGFAFromText,
     manualRegionReference,
@@ -1480,6 +1489,12 @@ function App({ worker, onStopLayout }: AppProps) {
     currentGraph?.sourceRecordCounts?.segments ?? currentGraph?.nodes.length ?? 0
   const isLargeGraph = graphNodeCount > LARGE_GRAPH_NODE_WARNING_THRESHOLD
   const hasPathsInGraph = (currentGraph?.paths?.length ?? 0) > 0
+  // For the Haplotype Sharing legend; the walk index is only built once that
+  // scheme is picked.
+  const legendWalkIndex =
+    colorScheme === 'haplotypes' && currentGraph
+      ? getWalkIndex(currentGraph)
+      : null
 
   const graphSectionRef = useRef<HTMLElement>(null)
   const [graphSectionWidth, setGraphSectionWidth] = useState(1200)
@@ -1837,7 +1852,8 @@ function App({ worker, onStopLayout }: AppProps) {
               regionStart={regionStart}
               regionEnd={regionEnd}
               onSetRegion={handleSetRegion}
-              allHaplotypes={extractAllHaplotypes}
+              allHaplotypes={regionAllHaplotypes}
+              allHaplotypesUnavailable={regionTrackIsRGFA}
               onAllHaplotypesChange={setExtractAllHaplotypes}
               onExtractRegion={handleExtractRegion}
               isExtracting={isExtractingSubgraph}
@@ -1860,11 +1876,14 @@ function App({ worker, onStopLayout }: AppProps) {
               paths={currentGraph?.paths ?? []}
               colorScheme={colorScheme}
               onColorSchemeChange={setColorScheme}
-              haplotypeCount={
-                colorScheme === 'haplotypes' && currentGraph
-                  ? getWalkIndex(currentGraph).haplotypes.length
-                  : 0
+              haplotypeCount={legendWalkIndex?.haplotypes.length ?? 0}
+              noHaplotypesMessage={
+                currentGraph && legendWalkIndex
+                  ? noHaplotypesMessage(currentGraph, legendWalkIndex)
+                  : null
               }
+              rgfaMaxRank={currentGraph ? getRGFAMaxRank(currentGraph) : null}
+              isDarkMode={isDarkMode}
               drawLabels={drawLabels}
               onDrawLabelsChange={setDrawLabels}
               hasGeneTrack={activeGeneTrack.length > 0}

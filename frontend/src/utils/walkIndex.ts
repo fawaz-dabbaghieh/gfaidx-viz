@@ -9,6 +9,7 @@
 // query than about the assembly, so no statistic is taken from walk counts.
 
 import type { Graph, GraphPath } from '../types'
+import { getRGFAMaxRank } from './rgfaRank'
 import { getSegmentIndex } from './segments'
 
 export interface HaploWalk {
@@ -227,6 +228,29 @@ function buildWalkIndex(graph: Graph): WalkIndex {
     visitCount,
     coordinateMismatches,
   }
+}
+
+// Why the haplotype features (sharing, traversals, the Haplotypes tab) have
+// nothing to show, or null when there are at least two haplotypes. An rGFA
+// has a single path, the reference rebuilt from its SN/SO tags, which would
+// otherwise come out as "100% of haplotypes".
+export function noHaplotypesMessage(
+  graph: Graph,
+  walkIndex: WalkIndex,
+): string | null {
+  const count = walkIndex.haplotypes.length
+  if (count >= 2) return null
+  if (getRGFAMaxRank(graph) !== null) {
+    return (
+      'This is an rGFA graph (e.g. from minigraph): it has no haplotype ' +
+      'paths, only the reference rebuilt from its SN/SO tags, so there are ' +
+      'no haplotypes to count or compare. Color by rGFA Rank (Display tab) ' +
+      'to see which nodes are on the reference.'
+    )
+  }
+  return count === 0
+    ? 'This graph has no paths or walks, so there are no haplotypes to count or compare.'
+    : 'This graph has a single path or walk, so there are no haplotypes to compare.'
 }
 
 // The preferred path (the queried or linear-layout reference) when it is one

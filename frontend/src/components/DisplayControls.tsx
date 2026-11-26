@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { ColorScheme, LayoutOptions, GraphPath } from '../types'
 import { pathHasRepeatedSegments } from '../utils/displayGraph'
 import { HAPLOTYPE_SHARING_GRADIENT } from '../utils/haplotypeSharingColor'
+import { RGFA_REFERENCE_COLOR, rgfaRankGradient } from '../utils/rgfaRank'
 import { HelpIcon } from './HelpIcon'
 import { SearchSelect } from './SearchSelect'
 
@@ -31,8 +32,13 @@ interface DisplayControlsProps {
   colorScheme: ColorScheme
   onColorSchemeChange: (scheme: ColorScheme) => void
   // Haplotypes in the graph, for the Haplotype Sharing legend (0 unless
-  // that scheme is chosen).
+  // that scheme is chosen), or why there are none to count.
   haplotypeCount: number
+  noHaplotypesMessage: string | null
+  // The highest rGFA rank (SR tag), null when the graph has none; for the
+  // rGFA Rank legend.
+  rgfaMaxRank: number | null
+  isDarkMode: boolean
   drawLabels: boolean
   onDrawLabelsChange: (draw: boolean) => void
   // Feature B: gene track toggle. Disabled (not hidden) when there are no
@@ -57,6 +63,9 @@ export function DisplayControls({
   colorScheme,
   onColorSchemeChange,
   haplotypeCount,
+  noHaplotypesMessage,
+  rgfaMaxRank,
+  isDarkMode,
   drawLabels,
   onDrawLabelsChange,
   hasGeneTrack,
@@ -109,6 +118,9 @@ export function DisplayControls({
                 'Haplotype Sharing: a heat map of how many haplotypes carry ' +
                 'each node, from red (one) to blue (all); grey where none ' +
                 'does. ' +
+                'rGFA Rank: for rGFA graphs (e.g. from minigraph), reference ' +
+                'nodes (rank 0) in blue and the rest in orange, by the order ' +
+                'their assemblies were added. ' +
                 'Grey: greyscale, useful when relying on path colors instead.'
               }
             />
@@ -123,23 +135,53 @@ export function DisplayControls({
             <option value="random">Rainbow</option>
             <option value="depth">Color by Depth</option>
             <option value="haplotypes">Haplotype Sharing</option>
+            <option value="rgfaRank">rGFA Rank</option>
             <option value="grey">Grey</option>
           </select>
           {colorScheme === 'haplotypes' &&
-            (haplotypeCount > 0 ? (
-              <div className="haplotype-sharing-legend">
+            (noHaplotypesMessage ? (
+              <div className="control-hint">{noHaplotypesMessage}</div>
+            ) : (
+              <div className="color-scheme-legend">
                 <div
-                  className="haplotype-sharing-gradient"
+                  className="color-scheme-gradient"
                   style={{ background: HAPLOTYPE_SHARING_GRADIENT }}
                 />
-                <div className="haplotype-sharing-labels">
+                <div className="color-scheme-legend-labels">
                   <span>1 haplotype</span>
                   <span>all {haplotypeCount.toLocaleString()}</span>
                 </div>
               </div>
-            ) : (
+            ))}
+          {colorScheme === 'rgfaRank' &&
+            (rgfaMaxRank === null ? (
               <div className="control-hint">
-                This graph has no paths, so there are no haplotypes to count.
+                This graph has no rGFA rank (SR) tags; only rGFA graphs, e.g.
+                from minigraph, have them.
+              </div>
+            ) : (
+              <div className="color-scheme-legend">
+                <div className="color-scheme-legend-key">
+                  <span
+                    className="bubbles-panel-swatch"
+                    style={{
+                      background: `rgb(${RGFA_REFERENCE_COLOR.join(', ')})`,
+                    }}
+                  />
+                  Reference (rank 0)
+                </div>
+                {rgfaMaxRank > 0 && (
+                  <>
+                    <div
+                      className="color-scheme-gradient"
+                      style={{ background: rgfaRankGradient(isDarkMode) }}
+                    />
+                    <div className="color-scheme-legend-labels">
+                      <span>rank 1 (first added)</span>
+                      <span>rank {rgfaMaxRank} (last)</span>
+                    </div>
+                  </>
+                )}
               </div>
             ))}
         </div>

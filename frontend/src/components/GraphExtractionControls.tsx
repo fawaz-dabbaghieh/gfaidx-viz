@@ -87,6 +87,9 @@ interface GraphExtractionControlsProps {
     end: number,
   ) => void
   allHaplotypes: boolean
+  // The track is built from an rGFA's segment tags (e.g. minigraph): with
+  // no haplotype paths, only BFS works.
+  allHaplotypesUnavailable: boolean
   onAllHaplotypesChange: (enabled: boolean) => void
   onExtractRegion: () => void
   isExtracting: boolean
@@ -154,6 +157,7 @@ export function GraphExtractionControls({
   regionEnd,
   onSetRegion,
   allHaplotypes,
+  allHaplotypesUnavailable,
   onAllHaplotypesChange,
   onExtractRegion,
   isExtracting,
@@ -577,13 +581,19 @@ export function GraphExtractionControls({
                         }
                       />
                     </span>
-                    <label>
+                    <label
+                      title={
+                        allHaplotypesUnavailable
+                          ? 'Not available for rGFA graphs, which have no haplotype paths'
+                          : undefined
+                      }
+                    >
                       <input
                         type="radio"
                         name="coordinate-region-mode"
                         checked={allHaplotypes}
                         onChange={() => onAllHaplotypesChange(true)}
-                        disabled={controlsDisabled}
+                        disabled={controlsDisabled || allHaplotypesUnavailable}
                       />
                       <span>All Haplotypes</span>
                     </label>
@@ -677,6 +687,14 @@ export function GraphExtractionControls({
                 <HelpIcon text="Give the extracted paths and walks their coordinates." />
               </label>
             </div>
+            {extractionMode !== 'neighborhood' && allHaplotypesUnavailable && (
+              <div className="control-hint query-options-note">
+                This is an rGFA graph (e.g. from minigraph), which has no
+                haplotype paths, so All Haplotypes isn't available: gfaidx
+                takes the reference nodes in the region, then adds their
+                neighborhood by BFS, up to Max Nodes.
+              </div>
+            )}
 
             <div className="query-submit">
               <button

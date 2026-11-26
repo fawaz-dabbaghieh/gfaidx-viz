@@ -32,6 +32,7 @@ import {
 import { clampZoom } from '../utils/zoom'
 import { getWalkIndex } from '../utils/walkIndex'
 import { haplotypeSharingColor } from '../utils/haplotypeSharingColor'
+import { getRGFAMaxRank, rgfaRank, rgfaRankColor } from '../utils/rgfaRank'
 import { type GeneRecord, stripPanSNPrefix } from '../utils/geneTrackBed'
 import {
   BUBBLE_HIGHLIGHT_COLORS,
@@ -1091,6 +1092,7 @@ function GraphCanvasComponent({
       })
     }
     const walkIndex = colorScheme === 'haplotypes' ? getWalkIndex(graph) : null
+    const maxRank = colorScheme === 'rgfaRank' ? getRGFAMaxRank(graph) : null
 
     const computeNodeColor = (
       node: GraphNode,
@@ -1214,6 +1216,9 @@ function GraphCanvasComponent({
           )
         }
 
+        case 'rgfaRank':
+          return rgfaRankColor(rgfaRank(node), maxRank ?? 0, isDarkMode)
+
         case 'grey':
           // Medium grey color
           return [160, 160, 160]
@@ -1228,7 +1233,7 @@ function GraphCanvasComponent({
     })
 
     return colors
-  }, [colorScheme, graph, nodeColorOverrides, csvColorOverrides])
+  }, [colorScheme, graph, isDarkMode, nodeColorOverrides, csvColorOverrides])
 
   const getNodeColor = useCallback(
     (node: GraphNode): [number, number, number] =>
@@ -3254,6 +3259,8 @@ function GraphCanvasComponent({
     (nodeName: string) => {
       if (!graph.paths?.length) return null
       const walkIndex = getWalkIndex(graph)
+      // A single path (e.g. an rGFA's reference) would read "1 of 1".
+      if (walkIndex.haplotypes.length < 2) return null
       const index = walkIndex.nodeIndex.get(nodeName)
       return {
         count: index === undefined ? 0 : walkIndex.haplotypesVisiting[index]!,

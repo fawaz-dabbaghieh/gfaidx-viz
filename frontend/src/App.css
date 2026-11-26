@@ -557,6 +557,10 @@ body:has(.app.dark-mode) {
   font-size: 14px;
 }
 
+.query-options-note {
+  margin: -8px 0 16px;
+}
+
 .query-option {
   display: inline-flex;
   align-items: center;
@@ -2057,18 +2061,26 @@ canvas {
   color: #fbbf24;
 }
 
-/* Haplotype Sharing color scheme legend (Display tab) */
-.haplotype-sharing-legend {
+/* Haplotype Sharing and rGFA Rank color scheme legends (Display tab) */
+.color-scheme-legend {
   margin-top: 8px;
   max-width: 260px;
 }
 
-.haplotype-sharing-gradient {
+.color-scheme-legend-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.color-scheme-gradient {
   height: 10px;
   border-radius: 2px;
 }
 
-.haplotype-sharing-labels {
+.color-scheme-legend-labels {
   display: flex;
   justify-content: space-between;
   margin-top: 2px;

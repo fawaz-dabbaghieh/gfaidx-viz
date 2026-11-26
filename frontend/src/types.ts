@@ -142,4 +142,10 @@ export interface Transform {
   translateY: number
 }
 
-export type ColorScheme = 'uniform' | 'random' | 'depth' | 'haplotypes' | 'grey'
+export type ColorScheme =
+  | 'uniform'
+  | 'random'
+  | 'depth'
+  | 'haplotypes'
+  | 'rgfaRank'
+  | 'grey'

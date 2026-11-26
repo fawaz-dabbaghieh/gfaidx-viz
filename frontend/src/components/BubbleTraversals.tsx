@@ -11,7 +11,11 @@ import {
   findTraversals,
   traversalsToTsv,
 } from '../utils/traversals'
-import { getWalkIndex, resolveReferencePath } from '../utils/walkIndex'
+import {
+  getWalkIndex,
+  noHaplotypesMessage,
+  resolveReferencePath,
+} from '../utils/walkIndex'
 import { TraversalLengthHistogram } from './TraversalLengthHistogram'
 import { useRowBatches } from './useRowBatches'
 
@@ -107,9 +111,10 @@ export function BubbleTraversals({
     pickedReferencePath,
     preferredReferencePath,
   )
+  const unavailable = noHaplotypesMessage(graph, walkIndex)
   const result = useMemo(
-    () => findTraversals(graph, bubble, referencePath),
-    [bubble, graph, referencePath],
+    () => (unavailable ? null : findTraversals(graph, bubble, referencePath)),
+    [bubble, graph, referencePath, unavailable],
   )
   const rows = useMemo(() => {
     if (!result) return []
@@ -121,10 +126,17 @@ export function BubbleTraversals({
   }, [result, sort])
   const { shownRows, hasMoreRows, listRef, moreRowRef } = useRowBatches(rows)
 
-  if (walkIndex.haplotypes.length === 0) {
+  const heading = (
+    <h4>
+      Traversals through {BUBBLE_TYPE_LABELS[bubble.type].toLowerCase()} #
+      {bubbleId(bubble)} ({bubble.source} – {bubble.sink})
+    </h4>
+  )
+  if (unavailable) {
     return (
-      <div className="bubble-traversals control-hint">
-        This graph has no paths or walks, so no traversals through the bubble.
+      <div className="bubble-traversals">
+        <div className="table-toolbar">{heading}</div>
+        <div className="control-hint">{unavailable}</div>
       </div>
     )
   }
@@ -166,10 +178,7 @@ export function BubbleTraversals({
   return (
     <div className="bubble-traversals">
       <div className="table-toolbar">
-        <h4>
-          Traversals through {BUBBLE_TYPE_LABELS[bubble.type].toLowerCase()} #
-          {bubbleId(bubble)} ({bubble.source} – {bubble.sink})
-        </h4>
+        {heading}
         <button
           type="button"
           className="table-download-button"

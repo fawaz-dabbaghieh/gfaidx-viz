@@ -6,6 +6,7 @@ import {
   getWalkIndex,
   haplotypeOnReference,
   haplotypesToTsv,
+  noHaplotypesMessage,
   referenceCovered,
   resolveReferencePath,
 } from '../utils/walkIndex'
@@ -177,13 +178,11 @@ export function HaplotypesPanel({
       </div>
     )
   }
-  if (walkIndex.haplotypes.length === 0) {
+  const unavailable = noHaplotypesMessage(graph, walkIndex)
+  if (unavailable) {
     return (
       <div className="settings-tab-content">
-        <div className="control-hint">
-          This graph has no paths or walks, so there are no haplotypes to
-          compare.
-        </div>
+        <div className="control-hint">{unavailable}</div>
       </div>
     )
   }
