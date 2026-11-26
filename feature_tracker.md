@@ -35,9 +35,9 @@ Tick each item once it is done and verified.
 - [x] Bubbles tab: Parent and Outermost columns; clicking either ID goes to
       that bubble's row and highlights it
 - [ ] "Show only this bubble" as its own small graph with a back button
-- [ ] Traversals through a bubble (to discuss): group the haplotypes
-      passing through it by traversal, and mark which traversal is the
-      reference's (see F7 below)
+- [x] Traversals through a bubble: grouped by exact route, the
+      reference's marked, length vs the reference, a length histogram for
+      10+ traversals, the route highlighted in red, TSV download (see F7)
 
 ## Haplotype features
 
@@ -53,6 +53,11 @@ Tick each item once it is done and verified.
 - [x] Node info panel: "Haplotypes: X of N (passes)"
 - [ ] F1: click a gene: highlight and colour its reference nodes
 - [ ] F1: pick a single exon or intron (BED12 blocks), not only the gene
+- [ ] F1: colour a gene's reference nodes in any layout, not only the
+      linear one, so it can be found in a force-directed graph too. The gene
+      track now needs the linear layout's reference coordinates; the walk
+      index's reference offsets (`compareToReference().refOffset`) give the
+      node-to-coordinate mapping without it
 - [ ] F2: per-haplotype coverage table for the selected gene (nodes, bp,
       fraction, max multiplicity, total visits) + `haplotype_gap` banner
 - [x] F3: reference-sharing table with orderings (shared sequence, total
@@ -63,10 +68,35 @@ Tick each item once it is done and verified.
 - [ ] F4: walk-rows track (reference on top, one row per haplotype);
       look at clustermap.js `refactor` branch for Mauve-style ribbons
 - [ ] F6: click a node: its site and nesting stack (see BubbleGun2 above)
-- [ ] F7: traversals through a site, both ends in either order, walking
-      the hierarchy; list for small sites, length distribution for large
+- [x] F7: traversals through a site, both ends in either order, read
+      between the site's own ends (so nested sites are included); list for
+      small sites, length distribution for large. LPA KIV-2 site: 464/464
+      haplotypes, 457 traversals (451 singletons), 5-172,073 bp, r = 0.9928
+      with seqLen. `utils/traversals.ts`, tested with Vitest
+- [ ] F7 follow-up (maybe): group a superbubble's traversals by the route
+      taken through each nested bubble instead of the exact node sequence
 - [ ] Exports: a download button per table, with graph, window, reference
       and gap in a header comment
+
+## FASTA downloads
+
+Spelled from the node sequences on the fly ('-' nodes reverse-complemented).
+Segments without a sequence ('*') can't be spelled, so say so instead.
+
+- [ ] Bubbles tab, picked bubble: "Download FASTA" next to the traversals'
+      TSV, one record per traversal (10 traversals, 10 records), named with
+      the bubble, the traversal and its haplotypes, e.g.
+      `>bubble7495_T3 bp=99847 haplotypes=HG00438#1,HG00621#2`; decide how
+      to keep very long haplotype lists readable (e.g. a count plus the
+      list, or the list in a separate TSV)
+- [ ] Haplotypes tab: "Download FASTA" next to "Download TSV", every
+      haplotype's sequence in the subgraph, one record per walk (a
+      haplotype split by the gap gives several), named by its path with
+      coordinates when known
+- [ ] Keep the downloads where they belong: the whole graph from the top
+      ("Download GFA"), haplotype TSV + FASTA in the Haplotypes tab, the
+      bubble list TSV + JSON in the Bubbles tab, and a picked bubble's
+      traversal TSV + FASTA under it
 
 ## Small fixes
 

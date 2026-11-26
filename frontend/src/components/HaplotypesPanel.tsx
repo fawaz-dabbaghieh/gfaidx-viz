@@ -6,8 +6,8 @@ import {
   getWalkIndex,
   haplotypeOnReference,
   haplotypesToTsv,
-  pickReferencePath,
   referenceCovered,
+  resolveReferencePath,
 } from '../utils/walkIndex'
 import { HelpIcon } from './HelpIcon'
 import { SearchSelect } from './SearchSelect'
@@ -132,11 +132,9 @@ export function HaplotypesPanel({
       ) ?? [],
     [walkIndex],
   )
-  const reference = !walkIndex
-    ? null
-    : referencePath && walkNames.includes(referencePath)
-      ? referencePath
-      : pickReferencePath(walkIndex, preferredReferencePath)
+  const reference = walkIndex
+    ? resolveReferencePath(walkIndex, referencePath, preferredReferencePath)
+    : null
   const comparison =
     walkIndex && reference ? compareToReference(walkIndex, reference) : null
 

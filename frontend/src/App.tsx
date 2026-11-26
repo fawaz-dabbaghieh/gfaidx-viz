@@ -9,6 +9,7 @@ import {
   SELECTION_INFO_PANEL_MIN_WIDTH,
 } from './components/SelectionInfoPanel'
 import { PathsLegend } from './components/PathsLegend'
+import type { PickedTraversal } from './components/BubbleTraversals'
 import { BubblesPanel } from './components/BubblesPanel'
 import { HaplotypesPanel } from './components/HaplotypesPanel'
 import { StatsPanel } from './components/StatsPanel'
@@ -228,6 +229,10 @@ function App({ worker, onStopLayout }: AppProps) {
     null,
   )
   const [focusBubbleRequestId, setFocusBubbleRequestId] = useState(0)
+  // A traversal through the highlighted bubble, picked in the Bubbles tab to
+  // show its route.
+  const [pickedTraversal, setPickedTraversal] =
+    useState<PickedTraversal | null>(null)
   // The reference walk picked in the Haplotypes tab, if any.
   const [haplotypeReference, setHaplotypeReference] = useState<string | null>(
     null,
@@ -392,6 +397,7 @@ function App({ worker, onStopLayout }: AppProps) {
   // every graph as soon as it is loaded.
   useEffect(() => {
     setHighlightedBubble(null)
+    setPickedTraversal(null)
     setHaplotypeReference(null)
     if (!currentGraph) return
     let current = true
@@ -414,6 +420,7 @@ function App({ worker, onStopLayout }: AppProps) {
   // Highlights a bubble and zooms to it; null clears the highlight.
   const handleHighlightBubble = useCallback((bubbleIndex: number | null) => {
     setHighlightedBubble(bubbleIndex)
+    setPickedTraversal(null)
     if (bubbleIndex !== null) setFocusBubbleRequestId(id => id + 1)
   }, [])
 
@@ -1909,10 +1916,15 @@ function App({ worker, onStopLayout }: AppProps) {
           <div hidden={controlTab !== 'bubbles'}>
             <BubblesPanel
               bubbles={currentBubbles}
-              graphName={currentGraph?.name ?? null}
+              graph={currentGraph}
+              isActive={controlTab === 'bubbles'}
               isDarkMode={isDarkMode}
               highlightedBubble={highlightedBubble}
               onShowBubble={handleShowBubble}
+              pickedReferencePath={haplotypeReference}
+              preferredReferencePath={layoutOptions.referencePathName}
+              pickedTraversalId={pickedTraversal?.id ?? null}
+              onPickTraversal={setPickedTraversal}
               onDownload={saveGfaTextAsFile}
             />
           </div>
@@ -2121,6 +2133,7 @@ function App({ worker, onStopLayout }: AppProps) {
               highlightedBubble={highlightedBubble}
               onHighlightBubble={handleHighlightBubble}
               focusBubbleRequestId={focusBubbleRequestId}
+              highlightedRoute={pickedTraversal?.nodes ?? null}
               onUseAsStartNode={setSubgraphStartNode}
               infoPanelWidth={clampedInfoPanelWidth}
               infoPanelMaxWidth={maxInfoPanelWidth}

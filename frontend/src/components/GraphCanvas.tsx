@@ -293,6 +293,9 @@ interface GraphCanvasProps {
   onHighlightBubble?: (bubbleIndex: number | null) => void
   // Bumped to zoom the view to the highlighted bubble.
   focusBubbleRequestId?: number
+  // Nodes of a traversal through the highlighted bubble, drawn apart from
+  // the rest of its inside.
+  highlightedRoute?: string[] | null
   onUseAsStartNode?: (nodeId: string) => void
   // Sized by App, which also fits the canvas into whatever width is left.
   infoPanelWidth?: number
@@ -383,6 +386,7 @@ function GraphCanvasComponent({
   highlightedBubble = null,
   onHighlightBubble,
   focusBubbleRequestId = 0,
+  highlightedRoute = null,
   onUseAsStartNode,
   infoPanelWidth = SELECTION_INFO_PANEL_DEFAULT_WIDTH,
   infoPanelMaxWidth = infoPanelWidth,
@@ -1023,17 +1027,19 @@ function GraphCanvasComponent({
     setSelectedGene(null)
   }, [visibleDisplayGraphTopology])
 
-  // The highlighted bubble's nodes, its two ends drawn apart from the rest.
+  // The highlighted bubble's nodes, its two ends and a picked traversal's
+  // route drawn apart from the rest.
   const highlightedBubbleRoles = useMemo(() => {
     const bubble =
       highlightedBubble === null ? undefined : bubbles?.bubbles[highlightedBubble]
     if (!bubble) return null
     const roles = new Map<string, BubbleNodeRole>()
     for (const name of bubble.inside) roles.set(name, 'inside')
+    for (const name of highlightedRoute ?? []) roles.set(name, 'route')
     roles.set(bubble.source, 'end')
     roles.set(bubble.sink, 'end')
     return roles
-  }, [bubbles, highlightedBubble])
+  }, [bubbles, highlightedBubble, highlightedRoute])
 
   // Zooms to the highlighted bubble when one is picked, in the Bubbles tab or
   // the info panel.

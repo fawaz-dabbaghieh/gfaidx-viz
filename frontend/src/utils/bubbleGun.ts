@@ -16,14 +16,16 @@ export const BUBBLE_TYPE_LABELS: Record<BubbleType, string> = {
   insertion: 'Insertion',
 }
 
-// A highlighted bubble outlines its two ends apart from the nodes inside.
-export type BubbleNodeRole = 'end' | 'inside'
+// A highlighted bubble outlines its two ends apart from the nodes inside, and
+// the nodes of a traversal picked in the Bubbles tab apart from the rest.
+export type BubbleNodeRole = 'end' | 'inside' | 'route'
 export const BUBBLE_HIGHLIGHT_COLORS: Record<
   BubbleNodeRole,
   { light: string; dark: string }
 > = {
   end: { light: '#059669', dark: '#34d399' },
   inside: { light: '#9333ea', dark: '#c084fc' },
+  route: { light: '#dc2626', dark: '#f87171' },
 }
 
 export interface Bubble {

@@ -252,6 +252,24 @@ export function pickReferencePath(
   return null
 }
 
+// The reference picked in the Haplotypes tab when it is one of the walks
+// here, otherwise pickReferencePath's choice.
+export function resolveReferencePath(
+  walkIndex: WalkIndex,
+  pickedPathName: string | null,
+  preferredPathName?: string | null,
+): string | null {
+  if (
+    pickedPathName &&
+    walkIndex.haplotypes.some(haplotype =>
+      haplotype.walks.some(walk => walk.pathName === pickedPathName),
+    )
+  ) {
+    return pickedPathName
+  }
+  return pickReferencePath(walkIndex, preferredPathName)
+}
+
 export function compareToReference(
   walkIndex: WalkIndex,
   referencePathName: string,

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import type { Graph } from '../types'
 import {
   BUBBLE_HIGHLIGHT_COLORS,
   BUBBLE_TYPE_LABELS,
@@ -9,6 +10,7 @@ import {
   bubblesToJson,
   bubblesToTsv,
 } from '../utils/bubbleGun'
+import { BubbleTraversals, type PickedTraversal } from './BubbleTraversals'
 import { useRowBatches } from './useRowBatches'
 
 type SortKey = 'id' | 'nodes' | 'bp' | 'nestedness'
@@ -33,21 +35,33 @@ const COLUMNS: { key: SortKey | null; label: string; numeric?: boolean }[] = [
 
 interface BubblesPanelProps {
   bubbles: BubbleSet | null
-  graphName: string | null
+  graph: Graph | null
+  // Traversals are only found while the tab is open.
+  isActive: boolean
   isDarkMode: boolean
   highlightedBubble: number | null
   onShowBubble: (bubbleIndex: number) => void
+  pickedReferencePath: string | null
+  preferredReferencePath: string
+  pickedTraversalId: number | null
+  onPickTraversal: (traversal: PickedTraversal | null) => void
   onDownload: (text: string, filename: string) => void
 }
 
 export function BubblesPanel({
   bubbles,
-  graphName,
+  graph,
+  isActive,
   isDarkMode,
   highlightedBubble,
   onShowBubble,
+  pickedReferencePath,
+  preferredReferencePath,
+  pickedTraversalId,
+  onPickTraversal,
   onDownload,
 }: BubblesPanelProps) {
+  const graphName = graph?.name ?? null
   const [typeFilter, setTypeFilter] = useState<BubbleType | 'all'>('all')
   // Biggest first by default.
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({
@@ -69,7 +83,7 @@ export function BubblesPanel({
   const { shownRows, hasMoreRows, listRef, moreRowRef, scrollToRow } =
     useRowBatches(shownBubbles)
 
-  if (!bubbles || !graphName) {
+  if (!bubbles || !graph || !graphName) {
     return (
       <div className="settings-tab-content">
         <div className="control-hint">
@@ -89,6 +103,8 @@ export function BubblesPanel({
         : { key, descending: key !== 'id' },
     )
   const theme = isDarkMode ? 'dark' : 'light'
+  const highlighted =
+    highlightedBubble === null ? undefined : bubbles.bubbles[highlightedBubble]
   // Highlights a parent or outermost bubble and scrolls to its row. Parents
   // are superbubbles, so a filter for another type is cleared first.
   const goToBubble = (bubbleIndex: number) => {
@@ -161,8 +177,9 @@ export function BubblesPanel({
         </button>
       </div>
       <div className="control-hint">
-        Click a bubble to highlight it in the graph and zoom to it; click it
-        again to remove the highlight. Nestedness is how many bubbles it is
+        Click a bubble to highlight it in the graph, zoom to it and list the
+        traversals through it below; click it again to remove the highlight.
+        Nestedness is how many bubbles it is
         nested in (0 = top level); Parent is the smallest superbubble around
         it and Outermost the top-level one. Click either ID to go to that
         bubble. Highlighted:{' '}
@@ -253,6 +270,19 @@ export function BubblesPanel({
           </tbody>
         </table>
       </div>
+      {isActive && highlighted && (
+        <BubbleTraversals
+          key={highlighted.index}
+          graph={graph}
+          bubble={highlighted}
+          pickedReferencePath={pickedReferencePath}
+          preferredReferencePath={preferredReferencePath}
+          isDarkMode={isDarkMode}
+          pickedTraversalId={pickedTraversalId}
+          onPickTraversal={onPickTraversal}
+          onDownload={onDownload}
+        />
+      )}
     </div>
   )
 }

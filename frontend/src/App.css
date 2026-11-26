@@ -1929,6 +1929,101 @@ canvas {
   color: #7fb2ff;
 }
 
+.bubble-traversals {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #ddd;
+}
+
+.app.dark-mode .bubble-traversals {
+  border-top-color: #444;
+}
+
+.bubble-traversals h4 {
+  margin: 0 auto 0 0;
+  font-size: 14px;
+}
+
+.bubble-traversals-haplotypes {
+  margin-top: 8px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.traversal-histogram {
+  max-width: 720px;
+  margin-top: 8px;
+}
+
+.traversal-histogram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.traversal-histogram-readout {
+  min-height: 1.4em;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.traversal-histogram-axis {
+  stroke: #ccc;
+}
+
+.traversal-histogram-label {
+  fill: #666;
+  font-size: 11px;
+}
+
+.traversal-histogram-bar {
+  fill: #9333ea;
+}
+
+.traversal-histogram-bar.hovered {
+  fill: #c084fc;
+}
+
+.traversal-histogram-reference line {
+  stroke: #111;
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+
+.traversal-histogram-reference text {
+  fill: #111;
+  font-size: 11px;
+}
+
+.traversal-histogram-hit {
+  fill: transparent;
+  outline: none;
+}
+
+.app.dark-mode .traversal-histogram-axis {
+  stroke: #444;
+}
+
+.app.dark-mode .traversal-histogram-label {
+  fill: #aaa;
+}
+
+.app.dark-mode .traversal-histogram-bar {
+  fill: #c084fc;
+}
+
+.app.dark-mode .traversal-histogram-bar.hovered {
+  fill: #e9d5ff;
+}
+
+.app.dark-mode .traversal-histogram-reference line {
+  stroke: #eee;
+}
+
+.app.dark-mode .traversal-histogram-reference text {
+  fill: #eee;
+}
+
 .sortable-table-more {
   color: #777;
   cursor: default;
@@ -1949,7 +2044,7 @@ canvas {
   cursor: default;
 }
 
-.haplotypes-panel .sortable-table tr.reference td {
+.sortable-table tr.reference td {
   font-weight: 600;
 }
 
