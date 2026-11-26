@@ -3,7 +3,7 @@
 // uses the graph's topology (segments and links), never its paths.
 
 import type { Graph } from '../types'
-import { stripNodeOrientation } from './displayGraph'
+import { getSegmentIndex } from './segments'
 
 export type BubbleType = 'simple' | 'super' | 'insertion'
 
@@ -36,6 +36,8 @@ export interface Bubble {
   insideBp: number
   // Index of the smallest superbubble holding this one, null at the top level.
   parent: number | null
+  // Index of the top-level bubble holding this one, null at the top level.
+  outermost: number | null
   // Number of bubbles this one is nested in (0 at the top level).
   nestedness: number
 }
@@ -120,29 +122,22 @@ function getWorker(): Worker {
 export async function findBubbles(graph: Graph): Promise<BubbleSet> {
   const startTime = performance.now()
 
-  // graph.nodes has one node per orientation in use; BubbleGun2 wants one
-  // per segment.
-  const names: string[] = []
-  const lengths: number[] = []
-  const indexByName = new Map<string, number>()
-  for (const node of graph.nodes) {
-    if (indexByName.has(node.name)) continue
-    indexByName.set(node.name, names.length)
-    names.push(node.name)
-    lengths.push(node.length)
-  }
+  // BubbleGun2 wants one node per segment, not per orientation.
+  const { names, lengths, indexByName, orientedIndex } = getSegmentIndex(graph)
 
-  const nodeIndex = (nodeId: string): number => {
-    const index = indexByName.get(stripNodeOrientation(nodeId))
-    if (index === undefined) throw new Error(`Edge to unknown node ${nodeId}`)
-    return index
+  const orientedNode = (nodeId: string): number => {
+    const oriented = orientedIndex.get(nodeId)
+    if (oriented === undefined) throw new Error(`Edge to unknown node ${nodeId}`)
+    return oriented
   }
   const edges = new Uint32Array(graph.edges.length * 4)
   graph.edges.forEach((edge, i) => {
-    edges[i * 4] = nodeIndex(edge.from)
-    edges[i * 4 + 1] = edge.from.endsWith('-') ? 1 : 0
-    edges[i * 4 + 2] = nodeIndex(edge.to)
-    edges[i * 4 + 3] = edge.to.endsWith('-') ? 1 : 0
+    const from = orientedNode(edge.from)
+    const to = orientedNode(edge.to)
+    edges[i * 4] = from >> 1
+    edges[i * 4 + 1] = from & 1
+    edges[i * 4 + 2] = to >> 1
+    edges[i * 4 + 3] = to & 1
   })
   const nodeLengths = Uint32Array.from(lengths)
 
@@ -166,12 +161,19 @@ export async function findBubbles(graph: Graph): Promise<BubbleSet> {
   }
 }
 
-function buildBubbleSet(result: WasmBubbles, names: string[], lengths: number[]) {
+function buildBubbleSet(
+  result: WasmBubbles,
+  names: string[],
+  lengths: Int32Array,
+) {
   const count = result.source.length
 
-  // Parents can come before or after their children, so each nestedness is
-  // found by walking up to the first bubble whose nestedness is known.
+  // Parents can come before or after their children, so each nestedness and
+  // outermost bubble is found by walking up to the first bubble whose
+  // nestedness is known.
   const nestednessOf = new Int32Array(count).fill(-1)
+  // The top-level bubble each one sits in (itself at the top level).
+  const outermostOf = new Int32Array(count)
   for (let i = 0; i < count; i++) {
     const chain: number[] = []
     let current = i
@@ -180,7 +182,12 @@ function buildBubbleSet(result: WasmBubbles, names: string[], lengths: number[])
       current = result.parent[current]!
     }
     let level = current === -1 ? -1 : nestednessOf[current]!
-    for (let j = chain.length - 1; j >= 0; j--) nestednessOf[chain[j]!] = ++level
+    const outermost =
+      current === -1 ? chain[chain.length - 1]! : outermostOf[current]!
+    for (let j = chain.length - 1; j >= 0; j--) {
+      nestednessOf[chain[j]!] = ++level
+      outermostOf[chain[j]!] = outermost
+    }
   }
 
   const counts: Record<BubbleType, number> = { simple: 0, super: 0, insertion: 0 }
@@ -224,6 +231,7 @@ function buildBubbleSet(result: WasmBubbles, names: string[], lengths: number[])
       inside,
       insideBp,
       parent: parent === -1 ? null : parent,
+      outermost: parent === -1 ? null : outermostOf[i]!,
       nestedness: nestednessOf[i]!,
     })
   }
@@ -272,6 +280,7 @@ export function bubblesToTsv(bubbleSet: BubbleSet, graphName: string): string {
       'bp_inside',
       'nestedness',
       'parent_id',
+      'outermost_id',
       'inside_nodes',
     ].join('\t'),
   ]
@@ -286,6 +295,7 @@ export function bubblesToTsv(bubbleSet: BubbleSet, graphName: string): string {
         bubble.insideBp,
         bubble.nestedness,
         bubble.parent === null ? '' : bubble.parent + 1,
+        bubble.outermost === null ? '' : bubble.outermost + 1,
         bubble.inside.join(','),
       ].join('\t'),
     )
@@ -305,6 +315,7 @@ export function bubblesToJson(bubbleSet: BubbleSet, graphName: string): string {
       bp_inside: bubble.insideBp,
       nestedness: bubble.nestedness,
       parent_id: bubble.parent === null ? null : bubble.parent + 1,
+      outermost_id: bubble.outermost === null ? null : bubble.outermost + 1,
     })),
   })
 }

@@ -66,12 +66,12 @@ provide through their rGFA tags.
   in its own color.
 - Hide everything that isn't on the selected paths.
 - Color the nodes of a path.
-- Draw a copy-number track showing how often a path visits each part of the
-  reference.
+- Draw a traversal multiplicity track showing how often a path visits each
+  part of the reference.
 
 ![The path list in the Paths tab](docs/images/paths1.png)
 
-![Two selected paths overlaid on the graph, with their copy-number tracks](docs/images/paths2.png)
+![Two selected paths overlaid on the graph, with their traversal multiplicity tracks](docs/images/paths2.png)
 
 ### Inspect nodes and connections
 

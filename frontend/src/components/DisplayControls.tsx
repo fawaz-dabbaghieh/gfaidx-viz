@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { ColorScheme, LayoutOptions, GraphPath } from '../types'
 import { pathHasRepeatedSegments } from '../utils/displayGraph'
+import { HAPLOTYPE_SHARING_GRADIENT } from '../utils/haplotypeSharingColor'
 import { HelpIcon } from './HelpIcon'
 import { SearchSelect } from './SearchSelect'
 
@@ -29,6 +30,9 @@ interface DisplayControlsProps {
   paths: GraphPath[]
   colorScheme: ColorScheme
   onColorSchemeChange: (scheme: ColorScheme) => void
+  // Haplotypes in the graph, for the Haplotype Sharing legend (0 unless
+  // that scheme is chosen).
+  haplotypeCount: number
   drawLabels: boolean
   onDrawLabelsChange: (draw: boolean) => void
   // Feature B: gene track toggle. Disabled (not hidden) when there are no
@@ -52,6 +56,7 @@ export function DisplayControls({
   paths,
   colorScheme,
   onColorSchemeChange,
+  haplotypeCount,
   drawLabels,
   onDrawLabelsChange,
   hasGeneTrack,
@@ -101,6 +106,9 @@ export function DisplayControls({
                 'Uniform: one color for every contig. ' +
                 'Rainbow: a distinct color per contig. ' +
                 'Color by Depth: color scaled by sequencing depth. ' +
+                'Haplotype Sharing: a heat map of how many haplotypes carry ' +
+                'each node, from red (one) to blue (all); grey where none ' +
+                'does. ' +
                 'Grey: greyscale, useful when relying on path colors instead.'
               }
             />
@@ -114,8 +122,26 @@ export function DisplayControls({
             <option value="uniform">Uniform Color</option>
             <option value="random">Rainbow</option>
             <option value="depth">Color by Depth</option>
+            <option value="haplotypes">Haplotype Sharing</option>
             <option value="grey">Grey</option>
           </select>
+          {colorScheme === 'haplotypes' &&
+            (haplotypeCount > 0 ? (
+              <div className="haplotype-sharing-legend">
+                <div
+                  className="haplotype-sharing-gradient"
+                  style={{ background: HAPLOTYPE_SHARING_GRADIENT }}
+                />
+                <div className="haplotype-sharing-labels">
+                  <span>1 haplotype</span>
+                  <span>all {haplotypeCount.toLocaleString()}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="control-hint">
+                This graph has no paths, so there are no haplotypes to count.
+              </div>
+            ))}
         </div>
 
         <div className="control-group">

@@ -72,7 +72,9 @@ export function parseGFA(file: string): GFAGraph {
   }
   const walkNameCounts = new Map<string, number>()
 
-  for (const line of file.split('\n')) {
+  // \r too, so a CRLF file doesn't leave it on the last field (e.g. the
+  // sequence of a segment with no tags, making it 1 bp too long).
+  for (const line of file.split(/\r?\n/)) {
     if (line.startsWith('H')) {
       const headerLine = {} as Record<string, string | number>
       const [, ...rest] = line.split('\t')

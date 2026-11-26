@@ -10,6 +10,7 @@ import {
 } from './components/SelectionInfoPanel'
 import { PathsLegend } from './components/PathsLegend'
 import { BubblesPanel } from './components/BubblesPanel'
+import { HaplotypesPanel } from './components/HaplotypesPanel'
 import { StatsPanel } from './components/StatsPanel'
 import { GraphExtractionControls } from './components/GraphExtractionControls'
 import { DownloadGraphsDialog } from './components/DownloadGraphsDialog'
@@ -19,6 +20,7 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { NodeStyleCsvPanel } from './components/NodeStyleCsvPanel'
 import { BandageLayoutWorker } from './utils/BandageLayoutWorker'
 import { findBubbles, type BubbleSet } from './utils/bubbleGun'
+import { getWalkIndex } from './utils/walkIndex'
 import { parseGFA } from './utils/gfaParser'
 import { convertGFAToGraph } from './utils/gfaConverter'
 import {
@@ -133,6 +135,7 @@ const CONTROL_TABS = [
   { id: 'display', label: 'Display' },
   { id: 'paths', label: 'Paths' },
   { id: 'bubbles', label: 'Bubbles' },
+  { id: 'haplotypes', label: 'Haplotypes' },
   { id: 'advanced', label: 'Advanced' },
   { id: 'styling', label: 'Styling' },
 ] as const
@@ -225,6 +228,10 @@ function App({ worker, onStopLayout }: AppProps) {
     null,
   )
   const [focusBubbleRequestId, setFocusBubbleRequestId] = useState(0)
+  // The reference walk picked in the Haplotypes tab, if any.
+  const [haplotypeReference, setHaplotypeReference] = useState<string | null>(
+    null,
+  )
   // The raw GFA text currentGraph was parsed from, kept only so "Download
   // GFA" can hand back exactly what was loaded rather than re-serializing
   // the parsed model (which could lose tags/fields it doesn't interpret).
@@ -385,6 +392,7 @@ function App({ worker, onStopLayout }: AppProps) {
   // every graph as soon as it is loaded.
   useEffect(() => {
     setHighlightedBubble(null)
+    setHaplotypeReference(null)
     if (!currentGraph) return
     let current = true
     findBubbles(currentGraph)
@@ -403,16 +411,18 @@ function App({ worker, onStopLayout }: AppProps) {
     }
   }, [currentGraph])
 
+  // Highlights a bubble and zooms to it; null clears the highlight.
+  const handleHighlightBubble = useCallback((bubbleIndex: number | null) => {
+    setHighlightedBubble(bubbleIndex)
+    if (bubbleIndex !== null) setFocusBubbleRequestId(id => id + 1)
+  }, [])
+
   const handleShowBubble = useCallback(
-    (bubbleIndex: number) => {
-      if (highlightedBubble === bubbleIndex) {
-        setHighlightedBubble(null)
-        return
-      }
-      setHighlightedBubble(bubbleIndex)
-      setFocusBubbleRequestId(id => id + 1)
-    },
-    [highlightedBubble],
+    (bubbleIndex: number) =>
+      handleHighlightBubble(
+        highlightedBubble === bubbleIndex ? null : bubbleIndex,
+      ),
+    [handleHighlightBubble, highlightedBubble],
   )
 
   const handleLocateNode = useCallback(() => {
@@ -1843,6 +1853,11 @@ function App({ worker, onStopLayout }: AppProps) {
               paths={currentGraph?.paths ?? []}
               colorScheme={colorScheme}
               onColorSchemeChange={setColorScheme}
+              haplotypeCount={
+                colorScheme === 'haplotypes' && currentGraph
+                  ? getWalkIndex(currentGraph).haplotypes.length
+                  : 0
+              }
               drawLabels={drawLabels}
               onDrawLabelsChange={setDrawLabels}
               hasGeneTrack={activeGeneTrack.length > 0}
@@ -1898,6 +1913,16 @@ function App({ worker, onStopLayout }: AppProps) {
               isDarkMode={isDarkMode}
               highlightedBubble={highlightedBubble}
               onShowBubble={handleShowBubble}
+              onDownload={saveGfaTextAsFile}
+            />
+          </div>
+          <div hidden={controlTab !== 'haplotypes'}>
+            <HaplotypesPanel
+              graph={currentGraph}
+              isActive={controlTab === 'haplotypes'}
+              referencePath={haplotypeReference}
+              preferredReferencePath={layoutOptions.referencePathName}
+              onReferencePathChange={setHaplotypeReference}
               onDownload={saveGfaTextAsFile}
             />
           </div>
@@ -2094,7 +2119,7 @@ function App({ worker, onStopLayout }: AppProps) {
               copyNumberPathNames={copyNumberPathNames}
               bubbles={currentBubbles}
               highlightedBubble={highlightedBubble}
-              onHighlightBubble={setHighlightedBubble}
+              onHighlightBubble={handleHighlightBubble}
               focusBubbleRequestId={focusBubbleRequestId}
               onUseAsStartNode={setSubgraphStartNode}
               infoPanelWidth={clampedInfoPanelWidth}

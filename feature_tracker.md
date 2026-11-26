@@ -30,7 +30,10 @@ Tick each item once it is done and verified.
       nodes and sequence in bubbles, max nestedness, detection time
 - [x] Bubbles tab: every bubble, biggest first (nodes inside), sortable,
       filter by type; clicking a row highlights and zooms to it
-- [x] Download bubbles as TSV and JSON (flat list with parent ids)
+- [x] Download bubbles as TSV and JSON (flat list with parent and
+      outermost ids)
+- [x] Bubbles tab: Parent and Outermost columns; clicking either ID goes to
+      that bubble's row and highlights it
 - [ ] "Show only this bubble" as its own small graph with a back button
 - [ ] Traversals through a bubble (to discuss): group the haplotypes
       passing through it by traversal, and mark which traversal is the
@@ -38,16 +41,25 @@ Tick each item once it is done and verified.
 
 ## Haplotype features
 
-- [ ] Task 0: `WalkIndex` (haplotypes, compact node indices, reference
-      offsets, breadth/depth); assert Σ node length = end − start per walk
-- [ ] Reference walk selector (default: the queried / linear-layout path;
-      PGGB P-lines grouped by `sample#hap` from the name)
+- [x] Task 0: `WalkIndex` (haplotypes, compact node indices, reference
+      offsets, haplotypes/visits per node); Σ node length = end − start per
+      walk is checked. `utils/walkIndex.ts`, tested with Vitest (LPA: all
+      brief values match, built in 164 ms)
+- [x] Reference walk selector in the UI (Haplotypes tab): default from
+      `pickReferencePath` (queried / linear-layout path, else CHM13, else
+      GRCh38); PGGB P-lines grouped by `sample#hap` from the name
+- [x] "Haplotype Sharing" color scheme: heat map from red (one haplotype)
+      to blue (all), legend in the Display tab
+- [x] Node info panel: "Haplotypes: X of N (passes)"
 - [ ] F1: click a gene: highlight and colour its reference nodes
 - [ ] F1: pick a single exon or intron (BED12 blocks), not only the gene
 - [ ] F2: per-haplotype coverage table for the selected gene (nodes, bp,
       fraction, max multiplicity, total visits) + `haplotype_gap` banner
-- [ ] F3: reference-sharing table with orderings (shared sequence, total
-      sequence, sample name)
+- [x] F3: reference-sharing table with orderings (shared sequence, total
+      sequence, % of the haplotype on the reference, % of the reference
+      covered, sample name) in the Haplotypes tab, with TSV download and a
+      warning for split haplotypes. Still missing: a user-supplied metadata
+      column (e.g. population) to sort by
 - [ ] F4: walk-rows track (reference on top, one row per haplotype);
       look at clustermap.js `refactor` branch for Mauve-style ribbons
 - [ ] F6: click a node: its site and nesting stack (see BubbleGun2 above)
@@ -58,8 +70,10 @@ Tick each item once it is done and verified.
 
 ## Small fixes
 
-- [ ] `gfaParser.ts`: strip `\r` so CRLF files don't add 1 bp to tagless
+- [x] `gfaParser.ts`: strip `\r` so CRLF files don't add 1 bp to tagless
       segments
-- [ ] Rename the "Copy #" / copy-number track to traversal multiplicity
-- [ ] On-screen caveats: only sequence on the reference is annotated; node
-      sharing is not sequence identity
+- [x] Rename the "Copy #" / copy-number track to traversal multiplicity
+      (button "Multiplicity"; internal names still say copyNumber)
+- [ ] On-screen caveats: only sequence on the reference is annotated (for
+      the gene features); node sharing is not sequence identity (done, in
+      the Haplotypes tab)

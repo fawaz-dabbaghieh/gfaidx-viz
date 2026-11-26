@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   BUBBLE_HIGHLIGHT_COLORS,
   BUBBLE_TYPE_LABELS,
@@ -9,10 +9,7 @@ import {
   bubblesToJson,
   bubblesToTsv,
 } from '../utils/bubbleGun'
-
-// About 10,000 bubbles for a 30,000-node region, so rows are rendered in
-// batches as the list scrolls, like the Paths list.
-const BUBBLE_ROWS_PER_BATCH = 100
+import { useRowBatches } from './useRowBatches'
 
 type SortKey = 'id' | 'nodes' | 'bp' | 'nestedness'
 
@@ -30,6 +27,8 @@ const COLUMNS: { key: SortKey | null; label: string; numeric?: boolean }[] = [
   { key: 'nodes', label: 'Nodes inside', numeric: true },
   { key: 'bp', label: 'bp inside', numeric: true },
   { key: 'nestedness', label: 'Nestedness', numeric: true },
+  { key: null, label: 'Parent', numeric: true },
+  { key: null, label: 'Outermost', numeric: true },
 ]
 
 interface BubblesPanelProps {
@@ -55,12 +54,6 @@ export function BubblesPanel({
     key: 'nodes',
     descending: true,
   })
-  const [renderedRowCount, setRenderedRowCount] = useState(
-    BUBBLE_ROWS_PER_BATCH,
-  )
-  const listRef = useRef<HTMLDivElement>(null)
-  const moreRowsRef = useRef<HTMLTableRowElement>(null)
-
   const shownBubbles = useMemo(() => {
     if (!bubbles) return []
     const value = SORT_VALUES[sort.key]
@@ -71,28 +64,10 @@ export function BubblesPanel({
         (a, b) => direction * (value(a) - value(b)) || a.index - b.index,
       )
   }, [bubbles, sort, typeFilter])
-  const hasMoreRows = shownBubbles.length > renderedRowCount
-
-  useEffect(() => {
-    setRenderedRowCount(BUBBLE_ROWS_PER_BATCH)
-    listRef.current?.scrollTo({ top: 0 })
-  }, [shownBubbles])
-
-  // Renders the next batch once the "more" marker scrolls near view.
-  useEffect(() => {
-    const marker = moreRowsRef.current
-    if (!hasMoreRows || !marker) return
-    const observer = new IntersectionObserver(
-      entries => {
-        if (entries.some(entry => entry.isIntersecting)) {
-          setRenderedRowCount(count => count + BUBBLE_ROWS_PER_BATCH)
-        }
-      },
-      { root: listRef.current, rootMargin: '300px' },
-    )
-    observer.observe(marker)
-    return () => observer.disconnect()
-  }, [hasMoreRows, renderedRowCount])
+  // About 10,000 bubbles for a 30,000-node region, so rows are rendered in
+  // batches as the list scrolls.
+  const { shownRows, hasMoreRows, listRef, moreRowRef, scrollToRow } =
+    useRowBatches(shownBubbles)
 
   if (!bubbles || !graphName) {
     return (
@@ -114,10 +89,36 @@ export function BubblesPanel({
         : { key, descending: key !== 'id' },
     )
   const theme = isDarkMode ? 'dark' : 'light'
+  // Highlights a parent or outermost bubble and scrolls to its row. Parents
+  // are superbubbles, so a filter for another type is cleared first.
+  const goToBubble = (bubbleIndex: number) => {
+    const bubble = bubbles.bubbles[bubbleIndex]!
+    if (typeFilter !== 'all' && typeFilter !== bubble.type) {
+      setTypeFilter('all')
+    }
+    if (highlightedBubble !== bubbleIndex) onShowBubble(bubbleIndex)
+    scrollToRow(bubble)
+  }
+  const bubbleLink = (bubbleIndex: number | null) =>
+    bubbleIndex === null ? (
+      '–'
+    ) : (
+      <button
+        type="button"
+        className="bubbles-panel-link"
+        title={`Go to bubble ${bubbleIndex + 1}`}
+        onClick={event => {
+          event.stopPropagation()
+          goToBubble(bubbleIndex)
+        }}
+      >
+        {bubbleIndex + 1}
+      </button>
+    )
 
   return (
     <div className="settings-tab-content bubbles-panel">
-      <div className="bubbles-panel-toolbar">
+      <div className="table-toolbar">
         <span>
           {bubbles.bubbles.length.toLocaleString()} bubbles:{' '}
           {bubbles.counts.simple.toLocaleString()} simple,{' '}
@@ -139,7 +140,7 @@ export function BubblesPanel({
         </select>
         <button
           type="button"
-          className="bubbles-panel-download"
+          className="table-download-button"
           onClick={() =>
             onDownload(bubblesToTsv(bubbles, graphName), `${baseName}.bubbles.tsv`)
           }
@@ -148,7 +149,7 @@ export function BubblesPanel({
         </button>
         <button
           type="button"
-          className="bubbles-panel-download"
+          className="table-download-button"
           onClick={() =>
             onDownload(
               bubblesToJson(bubbles, graphName),
@@ -162,7 +163,9 @@ export function BubblesPanel({
       <div className="control-hint">
         Click a bubble to highlight it in the graph and zoom to it; click it
         again to remove the highlight. Nestedness is how many bubbles it is
-        nested in (0 = top level). Highlighted:{' '}
+        nested in (0 = top level); Parent is the smallest superbubble around
+        it and Outermost the top-level one. Click either ID to go to that
+        bubble. Highlighted:{' '}
         <span
           className="bubbles-panel-swatch"
           style={{ background: BUBBLE_HIGHLIGHT_COLORS.end[theme] }}
@@ -174,7 +177,7 @@ export function BubblesPanel({
         />{' '}
         inside.
       </div>
-      <div className="bubbles-panel-list" ref={listRef}>
+      <div className="sortable-table" ref={listRef}>
         <table>
           <thead>
             <tr>
@@ -208,7 +211,7 @@ export function BubblesPanel({
             </tr>
           </thead>
           <tbody>
-            {shownBubbles.slice(0, renderedRowCount).map(bubble => (
+            {shownRows.map(bubble => (
               <tr
                 key={bubble.index}
                 className={
@@ -217,7 +220,13 @@ export function BubblesPanel({
                 tabIndex={0}
                 onClick={() => onShowBubble(bubble.index)}
                 onKeyDown={event => {
-                  if (event.key === 'Enter') onShowBubble(bubble.index)
+                  // Not for Enter on a Parent / Outermost link in the row.
+                  if (
+                    event.key === 'Enter' &&
+                    event.target === event.currentTarget
+                  ) {
+                    onShowBubble(bubble.index)
+                  }
                 }}
               >
                 <td className="numeric">{bubbleId(bubble)}</td>
@@ -230,11 +239,13 @@ export function BubblesPanel({
                 </td>
                 <td className="numeric">{bubble.insideBp.toLocaleString()}</td>
                 <td className="numeric">{bubble.nestedness}</td>
+                <td className="numeric">{bubbleLink(bubble.parent)}</td>
+                <td className="numeric">{bubbleLink(bubble.outermost)}</td>
               </tr>
             ))}
             {hasMoreRows && (
-              <tr ref={moreRowsRef}>
-                <td colSpan={COLUMNS.length} className="bubbles-panel-more">
+              <tr ref={moreRowRef}>
+                <td colSpan={COLUMNS.length} className="sortable-table-more">
                   Loading more bubbles...
                 </td>
               </tr>

@@ -11,6 +11,9 @@ export type SelectionInfo =
       sequencePreview: string | null
       csvMetadata?: Record<string, string>
       paths: { name: string; count: number }[]
+      // How many of the graph's haplotypes pass the node, and how often;
+      // null when the graph has no paths.
+      haplotypes: { count: number; total: number; visits: number } | null
       // Null until bubble detection has finished on this graph.
       bubbles: { nesting: Bubble[]; endOf: Bubble[] } | null
     }
@@ -143,6 +146,17 @@ export function SelectionInfoPanel({
               <dd>{selection.node.length.toLocaleString()} bp</dd>
               <dt>Depth</dt>
               <dd>{selection.node.depth.toFixed(2)}×</dd>
+              {selection.haplotypes && (
+                <>
+                  <dt>Haplotypes</dt>
+                  <dd>
+                    {selection.haplotypes.count.toLocaleString()} of{' '}
+                    {selection.haplotypes.total.toLocaleString()}
+                    {selection.haplotypes.visits > selection.haplotypes.count &&
+                      ` (${selection.haplotypes.visits.toLocaleString()} passes)`}
+                  </dd>
+                </>
+              )}
               <dt>Sequence</dt>
               <dd className="selection-info-mono">
                 {selection.sequencePreview ?? 'Not available'}

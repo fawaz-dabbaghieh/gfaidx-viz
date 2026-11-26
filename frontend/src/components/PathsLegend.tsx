@@ -176,7 +176,7 @@ const PathListRow = memo(function PathListRow({
           disabled={!hasCopyNumberTrack}
           title={
             hasCopyNumberTrack
-              ? 'Show/hide a copy-number track for this path under the ruler'
+              ? 'Show/hide how many times this path traverses each part of the reference, under the ruler'
               : 'Enable Linear Layout with a reference path first'
           }
           style={{
@@ -203,7 +203,7 @@ const PathListRow = memo(function PathListRow({
             flexShrink: 0,
           }}
         >
-          Copy #
+          Multiplicity
         </button>
       </label>
       {path.walk && (
@@ -464,11 +464,12 @@ export const PathsLegend = memo(function PathsLegend({
         Paths
         <HelpIcon
           text={
-            '"Color" paints the nodes a path traverses. "Copy #" draws a ' +
-            "chart under the ruler showing how many times that path revisits " +
-            'each part of the reference backbone - a value above 1 means a ' +
-            'local duplication/repeat relative to the backbone. Requires ' +
-            'Linear Layout with a reference path selected.'
+            '"Color" paints the nodes a path traverses. "Multiplicity" draws ' +
+            'a chart under the ruler of how many times that path traverses ' +
+            'each part of the reference backbone (its traversal ' +
+            'multiplicity). Above 1 means it passes there more than once, ' +
+            'e.g. through a collapsed repeat; this is not a copy number. ' +
+            'Requires Linear Layout with a reference path selected.'
           }
         />
       </div>

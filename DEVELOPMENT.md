@@ -94,9 +94,14 @@ Useful commands from `frontend/`:
 
 ```bash
 node_modules/.bin/tsc -b        # type-check
+npm test                        # unit tests (Vitest, *.test.ts files)
 npm run build                   # production build into frontend/dist
 npm run preview                 # serve the production build
 ```
+
+`GFAIDX_INTEGRATION=1 npm test` also runs the integration tests, which query
+the public backend (e.g. the LPA region, a 78 MB GFA) and check the values
+measured on it. `GFAIDX_BACKEND_URL` points them at another backend.
 
 ## Running your own gfaidx backend
 

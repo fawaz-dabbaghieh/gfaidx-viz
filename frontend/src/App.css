@@ -1395,7 +1395,7 @@ input[type='checkbox'] {
 }
 
 .graph-stats-button,
-.bubbles-panel-download {
+.table-download-button {
   padding: 7px 11px;
   border: 1px solid #ccc;
   background: white;
@@ -1406,7 +1406,7 @@ input[type='checkbox'] {
 }
 
 .graph-stats-button:hover:not(:disabled),
-.bubbles-panel-download:hover {
+.table-download-button:hover {
   background: #f0f0f0;
 }
 
@@ -1416,14 +1416,14 @@ input[type='checkbox'] {
 }
 
 .app.dark-mode .graph-stats-button,
-.app.dark-mode .bubbles-panel-download {
+.app.dark-mode .table-download-button {
   border-color: #555;
   background: #3a3a3a;
   color: #e0e0e0;
 }
 
 .app.dark-mode .graph-stats-button:hover:not(:disabled),
-.app.dark-mode .bubbles-panel-download:hover {
+.app.dark-mode .table-download-button:hover {
   background: #505050;
 }
 
@@ -1809,8 +1809,8 @@ canvas {
   font-size: 13px;
 }
 
-/* Bubbles tab: every bubble found by BubbleGun2, sortable */
-.bubbles-panel-toolbar {
+/* Bubbles and Haplotypes tabs: sortable tables */
+.table-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1819,7 +1819,7 @@ canvas {
   font-size: 13px;
 }
 
-.bubbles-panel-toolbar > span {
+.table-toolbar > span {
   margin-right: auto;
 }
 
@@ -1835,24 +1835,24 @@ canvas {
   vertical-align: middle;
 }
 
-.bubbles-panel-list {
+.sortable-table {
   max-height: 360px;
   margin-top: 8px;
   overflow-y: auto;
   border: 1px solid #ddd;
 }
 
-.app.dark-mode .bubbles-panel-list {
+.app.dark-mode .sortable-table {
   border-color: #444;
 }
 
-.bubbles-panel-list table {
+.sortable-table table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
 }
 
-.bubbles-panel-list th {
+.sortable-table th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -1863,12 +1863,12 @@ canvas {
   text-align: left;
 }
 
-.app.dark-mode .bubbles-panel-list th {
+.app.dark-mode .sortable-table th {
   border-bottom-color: #444;
   background: #2a2a2a;
 }
 
-.bubbles-panel-list th button {
+.sortable-table th button {
   padding: 0;
   border: none;
   background: none;
@@ -1877,37 +1877,37 @@ canvas {
   cursor: pointer;
 }
 
-.bubbles-panel-list .numeric {
+.sortable-table .numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.bubbles-panel-list td {
+.sortable-table td {
   padding: 4px 8px;
   border-bottom: 1px solid #eee;
 }
 
-.app.dark-mode .bubbles-panel-list td {
+.app.dark-mode .sortable-table td {
   border-bottom-color: #333;
 }
 
-.bubbles-panel-list tbody tr {
+.sortable-table tbody tr {
   cursor: pointer;
 }
 
-.bubbles-panel-list tbody tr:hover {
+.sortable-table tbody tr:hover {
   background: #f3f4f6;
 }
 
-.app.dark-mode .bubbles-panel-list tbody tr:hover {
+.app.dark-mode .sortable-table tbody tr:hover {
   background: #2f2f2f;
 }
 
-.bubbles-panel-list tbody tr.highlighted {
+.sortable-table tbody tr.highlighted {
   background: #f3e8ff;
 }
 
-.app.dark-mode .bubbles-panel-list tbody tr.highlighted {
+.app.dark-mode .sortable-table tbody tr.highlighted {
   background: #3b2552;
 }
 
@@ -1915,9 +1915,70 @@ canvas {
   overflow-wrap: anywhere;
 }
 
-.bubbles-panel-more {
+.bubbles-panel-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #0066cc;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.app.dark-mode .bubbles-panel-link {
+  color: #7fb2ff;
+}
+
+.sortable-table-more {
   color: #777;
   cursor: default;
+}
+
+.table-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.haplotypes-panel-reference {
+  flex: 0 1 340px;
+  min-width: 200px;
+}
+
+.haplotypes-panel .sortable-table tbody tr {
+  cursor: default;
+}
+
+.haplotypes-panel .sortable-table tr.reference td {
+  font-weight: 600;
+}
+
+.haplotypes-panel-split {
+  color: #b45309;
+  font-weight: 600;
+}
+
+.app.dark-mode .haplotypes-panel-split {
+  color: #fbbf24;
+}
+
+/* Haplotype Sharing color scheme legend (Display tab) */
+.haplotype-sharing-legend {
+  margin-top: 8px;
+  max-width: 260px;
+}
+
+.haplotype-sharing-gradient {
+  height: 10px;
+  border-radius: 2px;
+}
+
+.haplotype-sharing-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: 12px;
+  opacity: 0.8;
 }
 
 /* Click-selected node / connection details, to the right of the graph */

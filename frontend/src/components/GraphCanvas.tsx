@@ -30,6 +30,8 @@ import {
   type SelectionInfo,
 } from './SelectionInfoPanel'
 import { clampZoom } from '../utils/zoom'
+import { getWalkIndex } from '../utils/walkIndex'
+import { haplotypeSharingColor } from '../utils/haplotypeSharingColor'
 import { type GeneRecord, stripPanSNPrefix } from '../utils/geneTrackBed'
 import {
   BUBBLE_HIGHLIGHT_COLORS,
@@ -1033,7 +1035,8 @@ function GraphCanvasComponent({
     return roles
   }, [bubbles, highlightedBubble])
 
-  // Zooms to the highlighted bubble when the Bubbles tab asks for it.
+  // Zooms to the highlighted bubble when one is picked, in the Bubbles tab or
+  // the info panel.
   useEffect(() => {
     if (handledBubbleFocusRequestIdRef.current === focusBubbleRequestId) return
     handledBubbleFocusRequestIdRef.current = focusBubbleRequestId
@@ -1081,6 +1084,7 @@ function GraphCanvasComponent({
         maxDepth = Math.max(maxDepth, node.depth)
       })
     }
+    const walkIndex = colorScheme === 'haplotypes' ? getWalkIndex(graph) : null
 
     const computeNodeColor = (
       node: GraphNode,
@@ -1196,6 +1200,14 @@ function GraphCanvasComponent({
           }
         }
 
+        case 'haplotypes': {
+          const index = walkIndex!.nodeIndex.get(node.name)
+          return haplotypeSharingColor(
+            index === undefined ? 0 : walkIndex!.haplotypesVisiting[index]!,
+            walkIndex!.haplotypes.length,
+          )
+        }
+
         case 'grey':
           // Medium grey color
           return [160, 160, 160]
@@ -1210,7 +1222,7 @@ function GraphCanvasComponent({
     })
 
     return colors
-  }, [colorScheme, graph.nodes, nodeColorOverrides, csvColorOverrides])
+  }, [colorScheme, graph, nodeColorOverrides, csvColorOverrides])
 
   const getNodeColor = useCallback(
     (node: GraphNode): [number, number, number] =>
@@ -3230,6 +3242,22 @@ function GraphCanvasComponent({
     [drawPaths, visiblePathIds],
   )
 
+  // How many haplotypes carry a node, from the walk index (built on the
+  // first click, then cached for the graph).
+  const haplotypesAtNode = useCallback(
+    (nodeName: string) => {
+      if (!graph.paths?.length) return null
+      const walkIndex = getWalkIndex(graph)
+      const index = walkIndex.nodeIndex.get(nodeName)
+      return {
+        count: index === undefined ? 0 : walkIndex.haplotypesVisiting[index]!,
+        total: walkIndex.haplotypes.length,
+        visits: index === undefined ? 0 : walkIndex.totalVisits[index]!,
+      }
+    },
+    [graph],
+  )
+
   // Built from the topology rather than the positioned displayGraph so
   // dragging the selected node doesn't recount path visits every frame.
   const selectedNodeInfo = useMemo((): SelectionInfo | null => {
@@ -3245,6 +3273,7 @@ function GraphCanvasComponent({
       sequencePreview: sequence ? formatSequencePreview(sequence) : null,
       csvMetadata: nodeCsvMetadata?.[displayNode.node.id],
       paths: countPathVisitsToNode(displayNode, graph.paths ?? []),
+      haplotypes: haplotypesAtNode(displayNode.node.name),
       bubbles: bubbles ? bubblesAtNode(bubbles, displayNode.node.name) : null,
     }
   }, [
@@ -3252,6 +3281,7 @@ function GraphCanvasComponent({
     visibleDisplayGraphTopology,
     nodeCsvMetadata,
     graph.paths,
+    haplotypesAtNode,
     bubbles,
   ])
 
