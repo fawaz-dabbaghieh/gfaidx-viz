@@ -35,6 +35,14 @@ import { haplotypeSharingColor } from '../utils/haplotypeSharingColor'
 import { getRGFAMaxRank, rgfaRank, rgfaRankColor } from '../utils/rgfaRank'
 import { type GeneRecord, stripPanSNPrefix } from '../utils/geneTrackBed'
 import {
+  type GeneDescription,
+  NOT_IN_GENE_COLOR,
+  describeGenesAtNode,
+  geneColorAt,
+  getGeneNodeMap,
+} from '../utils/geneNodes'
+import { getSegmentIndex } from '../utils/segments'
+import {
   BUBBLE_HIGHLIGHT_COLORS,
   type BubbleNodeRole,
   type BubbleSet,
@@ -279,6 +287,11 @@ interface GraphCanvasProps {
   // reference path's sequence name happens inside this component, where
   // referencePathCoordinates is already computed.
   geneTrackAnnotations?: GeneRecord[]
+  // Every gene for this graph, drawn or not: for the Genes color scheme and
+  // the gene line in the node hover and info panel. They are placed on
+  // geneReferencePath, whatever the layout.
+  geneAnnotations?: GeneRecord[]
+  geneReferencePath?: string
   // Where the genes come from (a BED file name or the built-in set), shown
   // in the info panel for a clicked gene.
   geneTrackSource?: string | null
@@ -321,6 +334,7 @@ const MAX_DRAWN_REPEATS_PER_PATH = 5
 const ROTATION_RADIANS_PER_PIXEL = 0.002
 const MAX_ROTATION_STEP = Math.PI / 15
 const NO_PATH_TRAVERSALS: Int32Array = new Int32Array(0)
+const NO_GENES: GeneRecord[] = []
 
 // Keep accumulated angles bounded so trigonometric calculations remain stable
 // after long rotation sessions.
@@ -381,6 +395,8 @@ function GraphCanvasComponent({
   nodeLabelOverrides,
   nodeCsvMetadata,
   geneTrackAnnotations,
+  geneAnnotations = NO_GENES,
+  geneReferencePath = '',
   geneTrackSource = null,
   copyNumberPathNames,
   bubbles = null,
@@ -1077,6 +1093,14 @@ function GraphCanvasComponent({
     setSelectedGene(null)
   }, [geneTrackAnnotations, referencePathName, linearLayout])
 
+  // For the Genes color scheme: where each reference node sits among the
+  // genes, so nodes in genes can be drawn in color along their length.
+  const geneDrawMap = useMemo(() => {
+    if (colorScheme !== 'genes') return null
+    const result = getGeneNodeMap(graph, geneAnnotations, geneReferencePath)
+    return 'map' in result ? result.map : null
+  }, [colorScheme, graph, geneAnnotations, geneReferencePath])
+
   // Colors depend on graph data and user settings, not the viewport. Cache
   // them so wheel/pan redraws only perform a map lookup per visible node.
   const nodeColorsById = useMemo(() => {
@@ -1093,6 +1117,7 @@ function GraphCanvasComponent({
     }
     const walkIndex = colorScheme === 'haplotypes' ? getWalkIndex(graph) : null
     const maxRank = colorScheme === 'rgfaRank' ? getRGFAMaxRank(graph) : null
+    const { indexByName } = getSegmentIndex(graph)
 
     const computeNodeColor = (
       node: GraphNode,
@@ -1219,6 +1244,15 @@ function GraphCanvasComponent({
         case 'rgfaRank':
           return rgfaRankColor(rgfaRank(node), maxRank ?? 0, isDarkMode)
 
+        case 'genes': {
+          // Nodes in genes are drawn in color along their length; this is
+          // the color at their middle, for anything drawn in one color.
+          const index = indexByName.get(node.name)!
+          return geneDrawMap?.hits[index]
+            ? geneColorAt(geneDrawMap, index, 0.5, isDarkMode)
+            : NOT_IN_GENE_COLOR[isDarkMode ? 'dark' : 'light']
+        }
+
         case 'grey':
           // Medium grey color
           return [160, 160, 160]
@@ -1233,7 +1267,14 @@ function GraphCanvasComponent({
     })
 
     return colors
-  }, [colorScheme, graph, isDarkMode, nodeColorOverrides, csvColorOverrides])
+  }, [
+    colorScheme,
+    graph,
+    isDarkMode,
+    geneDrawMap,
+    nodeColorOverrides,
+    csvColorOverrides,
+  ])
 
   const getNodeColor = useCallback(
     (node: GraphNode): [number, number, number] =>
@@ -2018,9 +2059,77 @@ function GraphCanvasComponent({
         }
       }
 
-      ctx.strokeStyle = `rgb(${color.join(',')})`
       ctx.lineWidth = isHovered ? contigThickness + 1 : contigThickness
-      ctx.stroke()
+      const geneIndex = geneDrawMap
+        ? getSegmentIndex(graph).indexByName.get(node.name)
+        : undefined
+      if (
+        geneDrawMap &&
+        geneIndex !== undefined &&
+        geneDrawMap.hits[geneIndex] &&
+        !csvColorOverrides?.[node.id] &&
+        !nodeColorOverrides?.[node.id]
+      ) {
+        // Genes color scheme: the node is drawn in color along its length,
+        // so a long node shows its own stretch of the gene, with exons,
+        // introns and the gene's ends where they fall. Each piece of its
+        // line gets a gradient sampled from the reference bases it covers;
+        // a '-' node is drawn along its reverse strand.
+        const points = segments.map(segment =>
+          transformPoint(segment.x, segment.y),
+        )
+        const along = [0]
+        for (let i = 1; i < points.length; i++) {
+          along.push(
+            along[i - 1]! +
+              Math.hypot(
+                points[i]!.x - points[i - 1]!.x,
+                points[i]!.y - points[i - 1]!.y,
+              ),
+          )
+        }
+        const total = along[along.length - 1]!
+        const reverse = node.id.endsWith('-')
+        const map = geneDrawMap
+        const index = geneIndex
+        const colorAt = (fraction: number) => {
+          const [r, g, b] = geneColorAt(
+            map,
+            index,
+            reverse ? 1 - fraction : fraction,
+            isDarkMode,
+          )
+          return `rgb(${r},${g},${b})`
+        }
+        if (total < 1) {
+          ctx.strokeStyle = colorAt(0.5)
+          ctx.stroke()
+        } else {
+          for (let i = 1; i < points.length; i++) {
+            const from = points[i - 1]!
+            const to = points[i]!
+            const pieceLength = along[i]! - along[i - 1]!
+            if (pieceLength <= 0) continue
+            const gradient = ctx.createLinearGradient(from.x, from.y, to.x, to.y)
+            const samples = Math.max(1, Math.min(256, Math.ceil(pieceLength / 3)))
+            for (let k = 0; k <= samples; k++) {
+              const t = k / samples
+              gradient.addColorStop(
+                t,
+                colorAt((along[i - 1]! + pieceLength * t) / total),
+              )
+            }
+            ctx.strokeStyle = gradient
+            ctx.beginPath()
+            ctx.moveTo(from.x, from.y)
+            ctx.lineTo(to.x, to.y)
+            ctx.stroke()
+          }
+        }
+      } else {
+        ctx.strokeStyle = `rgb(${color.join(',')})`
+        ctx.stroke()
+      }
 
       // Draw node label if labels are enabled and node is long enough - or,
       // regardless of length, if a CSV gave this node an explicit label
@@ -2539,6 +2648,9 @@ function GraphCanvasComponent({
     highlightedBubbleRoles,
     isDarkMode,
     getNodeColor,
+    geneDrawMap,
+    csvColorOverrides,
+    nodeColorOverrides,
     displayGraph,
     nodeBoundsByKey,
     pathColors,
@@ -3253,6 +3365,18 @@ function GraphCanvasComponent({
     [drawPaths, visiblePathIds],
   )
 
+  // Where the node sits in each gene it is in (see describeGeneHit).
+  const genesAtNode = useCallback(
+    (nodeName: string): GeneDescription[] => {
+      if (geneAnnotations.length === 0) return []
+      const result = getGeneNodeMap(graph, geneAnnotations, geneReferencePath)
+      if (!('map' in result)) return []
+      const index = getSegmentIndex(graph).indexByName.get(nodeName)
+      return index === undefined ? [] : describeGenesAtNode(result.map, index)
+    },
+    [graph, geneAnnotations, geneReferencePath],
+  )
+
   // How many haplotypes carry a node, from the walk index (built on the
   // first click, then cached for the graph).
   const haplotypesAtNode = useCallback(
@@ -3287,6 +3411,7 @@ function GraphCanvasComponent({
       csvMetadata: nodeCsvMetadata?.[displayNode.node.id],
       paths: countPathVisitsToNode(displayNode, graph.paths ?? []),
       haplotypes: haplotypesAtNode(displayNode.node.name),
+      genes: genesAtNode(displayNode.node.name),
       bubbles: bubbles ? bubblesAtNode(bubbles, displayNode.node.name) : null,
     }
   }, [
@@ -3295,6 +3420,7 @@ function GraphCanvasComponent({
     nodeCsvMetadata,
     graph.paths,
     haplotypesAtNode,
+    genesAtNode,
     bubbles,
   ])
 
@@ -3390,6 +3516,19 @@ function GraphCanvasComponent({
                     {node.length.toLocaleString()} bp • {node.depth.toFixed(2)}×
                     depth
                   </div>
+                  {genesAtNode(node.name).map(gene => (
+                    <div
+                      key={gene.heading}
+                      style={{ fontSize: '12px', marginTop: '4px' }}
+                    >
+                      <div>{gene.heading}</div>
+                      {gene.parts.map(part => (
+                        <div key={part} style={{ paddingLeft: '10px' }}>
+                          {part}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
                 </div>
               </div>
             )

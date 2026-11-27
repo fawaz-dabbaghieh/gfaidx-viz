@@ -53,14 +53,30 @@ Tick each item once it is done and verified.
 - [x] Node info panel: "Haplotypes: X of N (passes)"
 - [ ] F1: click a gene: highlight and colour its reference nodes
 - [ ] F1: pick a single exon or intron (BED12 blocks), not only the gene
-- [ ] F1: colour a gene's reference nodes in any layout, not only the
-      linear one, so it can be found in a force-directed graph too. The gene
-      track now needs the linear layout's reference coordinates; the walk
-      index's reference offsets (`compareToReference().refOffset`) give the
-      node-to-coordinate mapping without it. Must work for rGFA graphs too,
-      through the reference walk rebuilt from the SN/SO tags
-- [ ] F2: per-haplotype coverage table for the selected gene (nodes, bp,
-      fraction, max multiplicity, total visits) + `haplotype_gap` banner
+- [x] F1: colour a gene's reference nodes in any layout: the "Genes" color
+      scheme, position along the gene as a rainbow from 5′ (blue) to 3′
+      (red), introns faded, grey outside genes or off the reference. Nodes
+      are colored along their length (a gradient per piece of their line),
+      so long nodes show their own stretch of the gene and a node crossing
+      an exon/intron boundary or a gene end changes color there. Placed
+      through the reference walk (rGFA: the SO tags), so it works in
+      force-directed layouts; built-in genes now load in any layout.
+      `utils/geneNodes.ts`, tested with Vitest. To decide after trying it:
+      whether the faded introns are clear enough
+- [x] F1: hover a node (and the node info panel): where it sits in its
+      gene and in each exon or intron it overlaps, counted from the gene's
+      5′ end, e.g. "AMY1C (−) · gene bases 2,444–3,467 of 8,794" then
+      "intron 4 of 10: bases 212–448 of 448", "exon 5 of 11: bases 1–231 of
+      231", ...; any part of the node outside the gene is noted
+- [ ] F1: say when a gene is cut off by the graph's edge (legend: how much
+      of each gene is in the graph; hover: "gene continues past this
+      graph"), e.g. PLG at the LPA region: only its first 23%, so only blue
+- [ ] Genes color scheme in dark mode: looks better in light mode; revisit
+      (faded introns look brownish in the orange/red part)
+- [ ] F2 (later): per-haplotype coverage table for the selected gene
+      (nodes, bp, fraction, max multiplicity, total visits) +
+      `haplotype_gap` banner. To think about first: gene information for
+      every haplotype, not only the reference
 - [x] F3: reference-sharing table with orderings (shared sequence, total
       sequence, % of the haplotype on the reference, % of the reference
       covered, sample name) in the Haplotypes tab, with TSV download and a
@@ -84,20 +100,18 @@ Tick each item once it is done and verified.
 Spelled from the node sequences on the fly ('-' nodes reverse-complemented).
 Segments without a sequence ('*') can't be spelled, so say so instead.
 
-- [ ] Bubbles tab, picked bubble: "Download FASTA" next to the traversals'
-      TSV, one record per traversal (10 traversals, 10 records), named with
-      the bubble, the traversal and its haplotypes, e.g.
-      `>bubble7495_T3 bp=99847 haplotypes=HG00438#1,HG00621#2`; decide how
-      to keep very long haplotype lists readable (e.g. a count plus the
-      list, or the list in a separate TSV)
-- [ ] Haplotypes tab: "Download FASTA" next to "Download TSV", every
-      haplotype's sequence in the subgraph, one record per walk (a
-      haplotype split by the gap gives several), named by its path with
-      coordinates when known
-- [ ] Keep the downloads where they belong: the whole graph from the top
-      ("Download GFA"), haplotype TSV + FASTA in the Haplotypes tab, the
-      bubble list TSV + JSON in the Bubbles tab, and a picked bubble's
-      traversal TSV + FASTA under it
+- [x] Bubbles tab, picked bubble: "Download FASTA" next to the traversals'
+      TSV, one record per traversal, the sequence between the two ends:
+      `>bubble7495_T3 bp=99847 reference=no haplotype_count=2
+      haplotypes=HG00438#1,HG00621#2` (every haplotype listed, after the
+      short ID, so tools that cut names at the first space keep the ID)
+- [x] Haplotypes tab: "Download FASTA" next to "Download TSV", one record
+      per walk, named by its path with coordinates when known, e.g.
+      `>CHM13#0#chr1:103642745-103751970 haplotype=CHM13#0 bp=109225`
+      (AMY1C: 519 records, 56 MB, 0.6 s)
+- [x] Downloads where they belong: the whole graph from the top, haplotype
+      TSV + FASTA in the Haplotypes tab, the bubble list TSV + JSON in the
+      Bubbles tab, a picked bubble's traversal TSV + FASTA under it
 
 ## rGFA (minigraph) graphs
 

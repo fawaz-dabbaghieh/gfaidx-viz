@@ -6,6 +6,7 @@ import {
   type Bubble,
   bubbleId,
 } from '../utils/bubbleGun'
+import { traversalsToFasta } from '../utils/fasta'
 import {
   type Traversal,
   findTraversals,
@@ -87,7 +88,7 @@ interface BubbleTraversalsProps {
   isDarkMode: boolean
   pickedTraversalId: number | null
   onPickTraversal: (traversal: PickedTraversal | null) => void
-  onDownload: (text: string, filename: string) => void
+  onDownload: (content: string | string[], filename: string) => void
 }
 
 export function BubbleTraversals({
@@ -104,6 +105,8 @@ export function BubbleTraversals({
     key: 'haplotypes',
     descending: true,
   })
+  // Traversals left out of the last FASTA download for lack of sequence.
+  const [fastaSkipped, setFastaSkipped] = useState(0)
 
   const walkIndex = getWalkIndex(graph)
   const referencePath = resolveReferencePath(
@@ -197,7 +200,32 @@ export function BubbleTraversals({
         >
           Download TSV
         </button>
+        <button
+          type="button"
+          className="table-download-button"
+          title="The sequence of every traversal, named with its haplotypes"
+          onClick={() => {
+            const fasta = traversalsToFasta(graph, walkIndex, bubble, result)
+            setFastaSkipped(fasta.skipped)
+            if (fasta.records > 0) {
+              onDownload(
+                fasta.chunks,
+                `${baseName}.bubble${bubbleId(bubble)}.traversals.fa`,
+              )
+            }
+          }}
+        >
+          Download FASTA
+        </button>
       </div>
+      {fastaSkipped > 0 && (
+        <div className="control-warning">
+          {fastaSkipped.toLocaleString()}{' '}
+          {fastaSkipped === 1 ? 'traversal was' : 'traversals were'} left out
+          of the FASTA: {fastaSkipped === 1 ? 'it runs' : 'they run'} through
+          nodes with no sequence in this GFA ('*').
+        </div>
+      )}
       <div className="control-hint">
         {result.traversals.length.toLocaleString()}{' '}
         {result.traversals.length === 1 ? 'traversal' : 'traversals'}

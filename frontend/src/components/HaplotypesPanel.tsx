@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { Graph } from '../types'
+import { haplotypesToFasta } from '../utils/fasta'
 import {
   type Haplotype,
   compareToReference,
@@ -106,7 +107,7 @@ interface HaplotypesPanelProps {
   referencePath: string | null
   preferredReferencePath: string
   onReferencePathChange: (pathName: string) => void
-  onDownload: (text: string, filename: string) => void
+  onDownload: (content: string | string[], filename: string) => void
 }
 
 export function HaplotypesPanel({
@@ -121,6 +122,8 @@ export function HaplotypesPanel({
     key: 'referenceCovered',
     descending: true,
   })
+  // Walks left out of the last FASTA download for lack of sequence.
+  const [fastaSkipped, setFastaSkipped] = useState(0)
 
   const walkIndex = useMemo(
     () => (isActive && graph ? getWalkIndex(graph) : null),
@@ -234,7 +237,29 @@ export function HaplotypesPanel({
         >
           Download TSV
         </button>
+        <button
+          type="button"
+          className="table-download-button"
+          title="Every haplotype's sequence in this graph, one record per walk"
+          onClick={() => {
+            const fasta = haplotypesToFasta(graph, walkIndex)
+            setFastaSkipped(fasta.skipped)
+            if (fasta.records > 0) {
+              onDownload(fasta.chunks, `${baseName}.haplotypes.fa`)
+            }
+          }}
+        >
+          Download FASTA
+        </button>
       </div>
+      {fastaSkipped > 0 && (
+        <div className="control-warning">
+          {fastaSkipped.toLocaleString()}{' '}
+          {fastaSkipped === 1 ? 'walk was' : 'walks were'} left out of the
+          FASTA: {fastaSkipped === 1 ? 'it runs' : 'they run'} through nodes
+          with no sequence in this GFA ('*').
+        </div>
+      )}
       {splitCount > 0 && (
         <div className="control-warning">
           {splitCount.toLocaleString()}{' '}

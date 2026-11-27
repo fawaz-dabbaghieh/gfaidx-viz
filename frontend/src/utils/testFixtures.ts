@@ -1,9 +1,11 @@
 // Small hand-built graphs shared by the unit tests.
-import { convertGFAToGraph } from './gfaConverter'
+import { type PathNameCoordinates, convertGFAToGraph } from './gfaConverter'
 import { parseGFA } from './gfaParser'
 
-export const graphFrom = (gfa: string, pathNameCoordinates = false) =>
-  convertGFAToGraph(parseGFA(gfa), 'test.gfa', pathNameCoordinates)
+export const graphFrom = (
+  gfa: string,
+  pathNameCoordinates: PathNameCoordinates = 'none',
+) => convertGFAToGraph(parseGFA(gfa), 'test.gfa', pathNameCoordinates)
 
 export const tsv = (lines: string[]) =>
   lines.map(line => line.replace(/ +/g, '\t')).join('\n')

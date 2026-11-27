@@ -116,7 +116,7 @@ describe('getWalkIndex', () => {
       'P HG4#1#chr1:20-21 2+ *',
       'P plain 1+,2+ *',
     ])
-    const withCoordinates = getWalkIndex(graphFrom(pLines, true))
+    const withCoordinates = getWalkIndex(graphFrom(pLines, 'any'))
     expect(withCoordinates.haplotypes.map(h => h.key)).toEqual(['HG4#1', 'plain'])
     const hg4 = withCoordinates.haplotypes[0]!
     expect(hg4.walks.map(w => [w.contig, w.start, w.end])).toEqual([

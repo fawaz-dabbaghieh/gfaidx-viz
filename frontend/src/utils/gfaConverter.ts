@@ -52,21 +52,30 @@ function parsePanSNName(name: string): {
 
 // gfaidx names each P-line of a "With Coordinates" extraction
 // "<sequence>:<start>-<end>" (0-based, end-exclusive), e.g.
-// "CHM13#0#chr1:103691893-103702700". Without coordinates the numbers can be
-// step positions instead, so the caller decides whether to trust them, and
-// the range must also be exactly as long as the path's sequence.
+// "CHM13#0#chr1:103691893-103702700", and so do other PGGB subgraphs (e.g.
+// from odgi extract). Without coordinates the numbers can be step positions
+// instead, so the caller decides whether to trust them, and the range must
+// also be exactly as long as the path's sequence.
 const PATH_NAME_RANGE = /^(.+):(\d+)-(\d+)$/
+
+// Which P-line names are read as coordinate ranges: any (a gfaidx "With
+// Coordinates" result), only PanSN ones ("sample#hap#contig:start-end" or
+// "sample#contig:start-end", for uploaded files), or none.
+export type PathNameCoordinates = 'any' | 'panSN' | 'none'
 
 function walkFromPathNameRange(
   name: string,
   pathLength: number,
+  accept: PathNameCoordinates,
 ): GraphWalkMetadata | undefined {
   const match = PATH_NAME_RANGE.exec(name)
   if (!match || Number(match[3]) - Number(match[2]) !== pathLength) {
     return undefined
   }
+  const panSN = parsePanSNName(match[1]!)
+  if (accept === 'panSN' && !panSN.sampleName) return undefined
   return {
-    ...parsePanSNName(match[1]!),
+    ...panSN,
     sequenceStart: match[2]!,
     sequenceEnd: match[3]!,
     tags: [],
@@ -141,9 +150,9 @@ function synthesizeRGFAReferencePaths(
 export function convertGFAToGraph(
   gfaGraph: GFAGraph,
   name: string = 'Imported GFA',
-  // Only for gfaidx "With Coordinates" results: read P-line names as
-  // coordinate ranges (see walkFromPathNameRange).
-  pathNameCoordinates: boolean = false,
+  // Whether P-line names are read as coordinate ranges (see
+  // walkFromPathNameRange).
+  pathNameCoordinates: PathNameCoordinates = 'none',
 ): Graph {
   // The app renders oriented nodes explicitly, so the converter expands each
   // GFA segment into + / - strand-specific node ids as needed by the links.
@@ -255,9 +264,10 @@ export function convertGFAToGraph(
     return uniqueName
   }
 
-  const segmentLengths = pathNameCoordinates
-    ? new Map(gfaGraph.nodes.map(node => [node.id, node.length]))
-    : null
+  const segmentLengths =
+    pathNameCoordinates !== 'none'
+      ? new Map(gfaGraph.nodes.map(node => [node.id, node.length]))
+      : null
 
   for (const gfaPath of gfaGraph.paths) {
     // Parse path string (format: node1+,node2-,node3+,...)
@@ -279,7 +289,11 @@ export function convertGFAToGraph(
       walk:
         gfaPath.walk ??
         (segmentLengths && gfaPath.recordType === 'P'
-          ? walkFromPathNameRange(gfaPath.name, pathLength)
+          ? walkFromPathNameRange(
+              gfaPath.name,
+              pathLength,
+              pathNameCoordinates,
+            )
           : undefined),
     })
   }

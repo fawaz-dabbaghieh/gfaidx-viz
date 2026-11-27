@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { ColorScheme, LayoutOptions, GraphPath } from '../types'
 import { pathHasRepeatedSegments } from '../utils/displayGraph'
 import { HAPLOTYPE_SHARING_GRADIENT } from '../utils/haplotypeSharingColor'
+import { geneGradient } from '../utils/geneNodes'
 import { RGFA_REFERENCE_COLOR, rgfaRankGradient } from '../utils/rgfaRank'
 import { HelpIcon } from './HelpIcon'
 import { SearchSelect } from './SearchSelect'
@@ -38,6 +39,13 @@ interface DisplayControlsProps {
   // The highest rGFA rank (SR tag), null when the graph has none; for the
   // rGFA Rank legend.
   rgfaMaxRank: number | null
+  // For the Genes legend: the reference the genes sit on and how many of
+  // them are in the graph, or why there are none (null unless that scheme is
+  // chosen).
+  geneLegend:
+    | { referencePath: string; geneCount: number }
+    | { message: string }
+    | null
   isDarkMode: boolean
   drawLabels: boolean
   onDrawLabelsChange: (draw: boolean) => void
@@ -65,6 +73,7 @@ export function DisplayControls({
   haplotypeCount,
   noHaplotypesMessage,
   rgfaMaxRank,
+  geneLegend,
   isDarkMode,
   drawLabels,
   onDrawLabelsChange,
@@ -121,6 +130,8 @@ export function DisplayControls({
                 'rGFA Rank: for rGFA graphs (e.g. from minigraph), reference ' +
                 'nodes (rank 0) in blue and the rest in orange, by the order ' +
                 'their assemblies were added. ' +
+                'Genes: reference nodes inside genes, colored from the ' +
+                "gene's 5′ start to its 3′ end; introns faded. " +
                 'Grey: greyscale, useful when relying on path colors instead.'
               }
             />
@@ -136,6 +147,7 @@ export function DisplayControls({
             <option value="depth">Color by Depth</option>
             <option value="haplotypes">Haplotype Sharing</option>
             <option value="rgfaRank">rGFA Rank</option>
+            <option value="genes">Genes</option>
             <option value="grey">Grey</option>
           </select>
           {colorScheme === 'haplotypes' &&
@@ -182,6 +194,37 @@ export function DisplayControls({
                     </div>
                   </>
                 )}
+              </div>
+            ))}
+          {colorScheme === 'genes' &&
+            geneLegend &&
+            ('message' in geneLegend ? (
+              <div className="control-hint">{geneLegend.message}</div>
+            ) : (
+              <div className="color-scheme-legend">
+                <div className="color-scheme-legend-key">Exons</div>
+                <div
+                  className="color-scheme-gradient"
+                  style={{ background: geneGradient(isDarkMode, false) }}
+                />
+                <div className="color-scheme-legend-key gene-legend-introns">
+                  Introns
+                </div>
+                <div
+                  className="color-scheme-gradient"
+                  style={{ background: geneGradient(isDarkMode, true) }}
+                />
+                <div className="color-scheme-legend-labels">
+                  <span>5′ gene start</span>
+                  <span>3′ gene end</span>
+                </div>
+                <div className="control-hint">
+                  {geneLegend.geneCount.toLocaleString()}{' '}
+                  {geneLegend.geneCount === 1 ? 'gene' : 'genes'} on{' '}
+                  {geneLegend.referencePath}. Grey: outside genes, or not on
+                  the reference (only reference sequence is annotated). Hover
+                  a node for its gene and exon or intron.
+                </div>
               </div>
             ))}
         </div>

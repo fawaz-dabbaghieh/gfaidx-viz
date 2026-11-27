@@ -45,7 +45,7 @@ interface BubblesPanelProps {
   preferredReferencePath: string
   pickedTraversalId: number | null
   onPickTraversal: (traversal: PickedTraversal | null) => void
-  onDownload: (text: string, filename: string) => void
+  onDownload: (content: string | string[], filename: string) => void
 }
 
 export function BubblesPanel({

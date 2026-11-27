@@ -3,6 +3,7 @@
 // added. They have no haplotype paths, only the reference, which
 // gfaConverter rebuilds from the rank-0 segments' SN/SO tags.
 import type { Graph, GraphNode } from '../types'
+import { type Rgb, rampColor, rampGradient } from './colorRamp'
 
 export function rgfaRank(node: GraphNode): number | null {
   const rank = node.tags?.SR
@@ -28,7 +29,6 @@ export function getRGFAMaxRank(graph: Graph): number | null {
 // other ranks on a ramp from the first assembly added to the last that
 // changes hue as well as lightness, so the two ends are far apart. Each
 // theme has its own ramp so every step stands out against the canvas.
-type Rgb = [number, number, number]
 export const RGFA_REFERENCE_COLOR: Rgb = [52, 152, 219]
 const NO_RANK_COLOR: Rgb = [160, 160, 160]
 const RANK_RAMPS: Record<'light' | 'dark', Rgb[]> = {
@@ -53,19 +53,12 @@ export function rgfaRankColor(
 ): Rgb {
   if (rank === null) return NO_RANK_COLOR
   if (rank === 0) return RGFA_REFERENCE_COLOR
-  const stops = RANK_RAMPS[isDarkMode ? 'dark' : 'light']
-  const t = maxRank > 1 ? Math.min(1, (rank - 1) / (maxRank - 1)) : 0
-  const position = t * (stops.length - 1)
-  const lower = Math.min(Math.floor(position), stops.length - 2)
-  const s = position - lower
-  const from = stops[lower]!
-  const to = stops[lower + 1]!
-  return [0, 1, 2].map(i =>
-    Math.round(from[i]! + (to[i]! - from[i]!) * s),
-  ) as Rgb
+  return rampColor(
+    RANK_RAMPS[isDarkMode ? 'dark' : 'light'],
+    maxRank > 1 ? (rank - 1) / (maxRank - 1) : 0,
+  )
 }
 
 export function rgfaRankGradient(isDarkMode: boolean): string {
-  const stops = RANK_RAMPS[isDarkMode ? 'dark' : 'light']
-  return `linear-gradient(to right, ${stops.map(stop => `rgb(${stop.join(', ')})`).join(', ')})`
+  return rampGradient(RANK_RAMPS[isDarkMode ? 'dark' : 'light'])
 }

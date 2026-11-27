@@ -148,4 +148,5 @@ export type ColorScheme =
   | 'depth'
   | 'haplotypes'
   | 'rgfaRank'
+  | 'genes'
   | 'grey'

@@ -21,6 +21,7 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { NodeStyleCsvPanel } from './components/NodeStyleCsvPanel'
 import { BandageLayoutWorker } from './utils/BandageLayoutWorker'
 import { findBubbles, type BubbleSet } from './utils/bubbleGun'
+import { getGeneNodeMap } from './utils/geneNodes'
 import { getRGFAMaxRank } from './utils/rgfaRank'
 import { getWalkIndex, noHaplotypesMessage } from './utils/walkIndex'
 import { parseGFA } from './utils/gfaParser'
@@ -753,7 +754,8 @@ function App({ worker, onStopLayout }: AppProps) {
       source: 'browser' | 'backend-extraction' = 'browser',
       ticket?: string,
       // A gfaidx "With Coordinates" result, whose P-line names carry
-      // coordinate ranges. Never assumed for uploaded files.
+      // coordinate ranges. Uploaded files are only trusted with PanSN names
+      // whose range matches the path's length; other extractions never.
       withCoords: boolean = false,
       // Only set for a coordinate-region extraction: identifies the
       // path/walk the user actually queried, so it can become the linear
@@ -767,7 +769,11 @@ function App({ worker, onStopLayout }: AppProps) {
         setLinearLayoutFallbackWarning(null)
 
         const gfaGraph = parseGFA(text)
-        const graph = convertGFAToGraph(gfaGraph, filename, withCoords)
+        const graph = convertGFAToGraph(
+          gfaGraph,
+          filename,
+          withCoords ? 'any' : source === 'browser' ? 'panSN' : 'none',
+        )
 
         if (source === 'browser') {
           const localGraphId = `${LOCAL_GRAPH_ID_PREFIX}${filename}`
@@ -855,17 +861,24 @@ function App({ worker, onStopLayout }: AppProps) {
     [],
   )
 
-  const saveGfaTextAsFile = useCallback((text: string, filename: string) => {
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-  }, [])
+  // Large downloads (e.g. a FASTA of every haplotype) come as chunks, so they
+  // are never joined into one string.
+  const saveGfaTextAsFile = useCallback(
+    (content: string | string[], filename: string) => {
+      const blob = new Blob(Array.isArray(content) ? content : [content], {
+        type: 'text/plain;charset=utf-8',
+      })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    },
+    [],
+  )
 
   // Extraction results are re-fetched from the backend by ticket rather than
   // re-serialized from a client-held copy - the backend's result endpoint
@@ -1396,23 +1409,29 @@ function App({ worker, onStopLayout }: AppProps) {
     setGeneTrackFileName(null)
   }, [])
 
-  // Built-in genes for the drawn linear layout's reference path, when it's a
-  // GRCh38 or CHM13 chromosome with real coordinates. Based on the applied
-  // layout (what's on screen), and only one chromosome file is fetched.
+  // The path genes are placed on, in any layout: the drawn Reference Path,
+  // else the first CHM13 or GRCh38 path, else the graph's only path (e.g. an
+  // rGFA's reference rebuilt from its tags).
+  const geneReferencePath = useMemo(() => {
+    if (appliedLayoutOptions?.referencePathName) {
+      return appliedLayoutOptions.referencePathName
+    }
+    const paths = currentGraph?.paths ?? []
+    const path =
+      paths.find(candidate => /chm13/i.test(candidate.name)) ??
+      paths.find(candidate => /grch38/i.test(candidate.name)) ??
+      (paths.length === 1 ? paths[0] : undefined)
+    return path?.name ?? ''
+  }, [appliedLayoutOptions, currentGraph])
+
+  // Built-in genes for that path, when it's a GRCh38 or CHM13 chromosome with
+  // real coordinates. Only one chromosome file is fetched.
   const builtInGeneSet = useMemo(() => {
-    if (
-      geneTrackFileName ||
-      !currentGraph ||
-      !appliedLayoutOptions?.linearLayout ||
-      !appliedLayoutOptions.referencePathName
-    ) {
+    if (geneTrackFileName || !currentGraph || !geneReferencePath) {
       return null
     }
-    return builtInGeneSetForPath(
-      currentGraph,
-      appliedLayoutOptions.referencePathName,
-    )
-  }, [appliedLayoutOptions, currentGraph, geneTrackFileName])
+    return builtInGeneSetForPath(currentGraph, geneReferencePath)
+  }, [currentGraph, geneReferencePath, geneTrackFileName])
   const builtInGeneAssembly = builtInGeneSet?.assembly ?? null
   const builtInGeneChrom = builtInGeneSet?.chrom ?? null
 
@@ -1495,6 +1514,19 @@ function App({ worker, onStopLayout }: AppProps) {
     colorScheme === 'haplotypes' && currentGraph
       ? getWalkIndex(currentGraph)
       : null
+  // For the Genes legend: the same genes and reference the canvas colors by.
+  const geneResult =
+    colorScheme === 'genes' && currentGraph
+      ? getGeneNodeMap(currentGraph, activeGeneTrack, geneReferencePath)
+      : null
+  const geneLegend = !geneResult
+    ? null
+    : 'map' in geneResult
+      ? {
+          referencePath: geneResult.map.referencePath,
+          geneCount: geneResult.map.geneCount,
+        }
+      : { message: geneResult.message }
 
   const graphSectionRef = useRef<HTMLElement>(null)
   const [graphSectionWidth, setGraphSectionWidth] = useState(1200)
@@ -1883,6 +1915,7 @@ function App({ worker, onStopLayout }: AppProps) {
                   : null
               }
               rgfaMaxRank={currentGraph ? getRGFAMaxRank(currentGraph) : null}
+              geneLegend={geneLegend}
               isDarkMode={isDarkMode}
               drawLabels={drawLabels}
               onDrawLabelsChange={setDrawLabels}
@@ -2146,6 +2179,8 @@ function App({ worker, onStopLayout }: AppProps) {
               nodeLabelOverrides={csvLabelOverrides}
               nodeCsvMetadata={csvNodeMetadata}
               geneTrackAnnotations={showGeneTrack ? activeGeneTrack : NO_GENES}
+              geneAnnotations={activeGeneTrack}
+              geneReferencePath={geneReferencePath}
               geneTrackSource={geneTrackSource}
               copyNumberPathNames={copyNumberPathNames}
               bubbles={currentBubbles}

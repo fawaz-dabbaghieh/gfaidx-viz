@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import type { GraphNode } from '../types'
 import { BUBBLE_TYPE_LABELS, type Bubble, bubbleId } from '../utils/bubbleGun'
 import type { EdgePathGroup } from '../utils/displayGraph'
+import type { GeneDescription } from '../utils/geneNodes'
 import type { GeneRecord } from '../utils/geneTrackBed'
 
 export type SelectionInfo =
@@ -14,6 +15,9 @@ export type SelectionInfo =
       // How many of the graph's haplotypes pass the node, and how often;
       // null when the graph has no paths.
       haplotypes: { count: number; total: number; visits: number } | null
+      // Where the node sits in each gene it is in, and in their exons and
+      // introns (only reference nodes are annotated).
+      genes: GeneDescription[]
       // Null until bubble detection has finished on this graph.
       bubbles: { nesting: Bubble[]; endOf: Bubble[] } | null
     }
@@ -154,6 +158,23 @@ export function SelectionInfoPanel({
                     {selection.haplotypes.total.toLocaleString()}
                     {selection.haplotypes.visits > selection.haplotypes.count &&
                       ` (${selection.haplotypes.visits.toLocaleString()} passes)`}
+                  </dd>
+                </>
+              )}
+              {selection.genes.length > 0 && (
+                <>
+                  <dt>{selection.genes.length === 1 ? 'Gene' : 'Genes'}</dt>
+                  <dd>
+                    {selection.genes.map(gene => (
+                      <div key={gene.heading}>
+                        <div>{gene.heading}</div>
+                        {gene.parts.map(part => (
+                          <div key={part} className="selection-gene-part">
+                            {part}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
                   </dd>
                 </>
               )}

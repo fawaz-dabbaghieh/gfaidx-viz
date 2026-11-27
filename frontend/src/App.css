@@ -2075,6 +2075,10 @@ canvas {
   font-size: 12px;
 }
 
+.gene-legend-introns {
+  margin-top: 6px;
+}
+
 .color-scheme-gradient {
   height: 10px;
   border-radius: 2px;
@@ -2207,6 +2211,10 @@ canvas {
   margin-bottom: 3px;
   font-size: 12px;
   font-weight: 600;
+}
+
+.selection-gene-part {
+  padding-left: 10px;
 }
 
 .selection-bubble-row {
