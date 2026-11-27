@@ -51,8 +51,13 @@ Tick each item once it is done and verified.
 - [x] "Haplotype Sharing" color scheme: heat map from red (one haplotype)
       to blue (all), legend in the Display tab
 - [x] Node info panel: "Haplotypes: X of N (passes)"
-- [ ] F1: click a gene: highlight and colour its reference nodes
-- [ ] F1: pick a single exon or intron (BED12 blocks), not only the gene
+- [x] F1: click a gene (in the gene track, or the gene line of a node's
+      info panel): the panel shows it, with its reference nodes found in
+      any layout, and the whole gene is outlined in the graph
+- [x] F1: pick exons and introns: tick boxes in the gene panel (5′ first,
+      with lengths; parts outside the graph greyed), "All exons", "All
+      introns", "Clear", "Zoom to highlighted". The outline covers exactly
+      the ticked bases, also inside long nodes, in any color scheme
 - [x] F1: colour a gene's reference nodes in any layout: the "Genes" color
       scheme, position along the gene as a rainbow from 5′ (blue) to 3′
       (red), introns faded, grey outside genes or off the reference. Nodes
@@ -68,11 +73,12 @@ Tick each item once it is done and verified.
       5′ end, e.g. "AMY1C (−) · gene bases 2,444–3,467 of 8,794" then
       "intron 4 of 10: bases 212–448 of 448", "exon 5 of 11: bases 1–231 of
       231", ...; any part of the node outside the gene is noted
-- [ ] F1: say when a gene is cut off by the graph's edge (legend: how much
-      of each gene is in the graph; hover: "gene continues past this
-      graph"), e.g. PLG at the LPA region: only its first 23%, so only blue
-- [ ] Genes color scheme in dark mode: looks better in light mode; revisit
-      (faded introns look brownish in the orange/red part)
+- [x] F1: say when a gene is cut off by the graph's edge: the Genes legend
+      lists them ("PLG: 23%, 3′ end outside"), the hover and the gene panel
+      say which of its bases are in the graph
+- [x] Genes color scheme in dark mode: introns are now washed out toward
+      grey at the same brightness instead of faded toward the dark canvas
+      (which made them brown). To judge after trying it
 - [ ] F2 (later): per-haplotype coverage table for the selected gene
       (nodes, bp, fraction, max multiplicity, total visits) +
       `haplotype_gap` banner. To think about first: gene information for
@@ -136,6 +142,10 @@ it (SN).
       segments
 - [x] Rename the "Copy #" / copy-number track to traversal multiplicity
       (button "Multiplicity"; internal names still say copyNumber)
-- [ ] On-screen caveats: only sequence on the reference is annotated (for
-      the gene features); node sharing is not sequence identity (done, in
-      the Haplotypes tab)
+- [x] Uploaded PGGB graphs: P-lines named "sample#hap#contig:start-end"
+      (or "sample#contig:start-end") get coordinates when the range is as
+      long as the path, so genes (and the linear-layout ruler) work on
+      them; other uploaded P-lines get none, and the Genes legend says why
+- [x] On-screen caveats: only sequence on the reference is annotated (in
+      the Genes legend); node sharing is not sequence identity (in the
+      Haplotypes tab)

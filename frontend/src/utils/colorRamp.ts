@@ -27,3 +27,11 @@ export function fadeToward(color: Rgb, background: Rgb, amount: number): Rgb {
     Math.round(color[i]! + (background[i]! - color[i]!) * amount),
   ) as Rgb
 }
+
+// `color` mixed toward the grey of its own brightness by `amount`: washed
+// out but as bright as before, where fading toward a dark canvas would
+// darken it.
+export function desaturate(color: Rgb, amount: number): Rgb {
+  const grey = 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2]
+  return fadeToward(color, [grey, grey, grey], amount)
+}

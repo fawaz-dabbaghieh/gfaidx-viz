@@ -43,7 +43,7 @@ interface DisplayControlsProps {
   // them are in the graph, or why there are none (null unless that scheme is
   // chosen).
   geneLegend:
-    | { referencePath: string; geneCount: number }
+    | { referencePath: string; geneCount: number; cutOff: string[] }
     | { message: string }
     | null
   isDarkMode: boolean
@@ -225,6 +225,12 @@ export function DisplayControls({
                   the reference (only reference sequence is annotated). Hover
                   a node for its gene and exon or intron.
                 </div>
+                {geneLegend.cutOff.length > 0 && (
+                  <div className="control-hint">
+                    Cut off by the graph's edge, so only part of the color
+                    range shows: {geneLegend.cutOff.join('; ')}.
+                  </div>
+                )}
               </div>
             ))}
         </div>

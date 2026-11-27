@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import type { GraphNode } from '../types'
 import { BUBBLE_TYPE_LABELS, type Bubble, bubbleId } from '../utils/bubbleGun'
 import type { EdgePathGroup } from '../utils/displayGraph'
-import type { GeneDescription } from '../utils/geneNodes'
+import type { GeneDescription, GeneStructurePart } from '../utils/geneNodes'
 import type { GeneRecord } from '../utils/geneTrackBed'
 
 export type SelectionInfo =
@@ -37,6 +37,12 @@ export type SelectionInfo =
       // Bare names of the reference path's nodes the gene overlaps, in path
       // order.
       referenceNodeNames: string[]
+      // When the graph holds only part of the gene, which part.
+      inGraph: string | null
+      // Its exons and introns, 5′ first, and which are outlined in the graph
+      // ('gene' for all of it).
+      parts: (GeneStructurePart & { inGraph: boolean })[]
+      selectedParts: ReadonlySet<string>
     }
 
 // Exported so App can size the canvas to the space the panel leaves. The gap
@@ -56,6 +62,11 @@ interface SelectionInfoPanelProps {
   onUseAsStartNode?: (nodeName: string) => void
   highlightedBubble?: number | null
   onHighlightBubble?: (bubbleIndex: number | null) => void
+  // Opens a gene from a node's gene line.
+  onSelectGene?: (gene: GeneRecord) => void
+  onGenePartsChange?: (parts: ReadonlySet<string>) => void
+  // Undefined when nothing of the gene is outlined.
+  onZoomToGenePick?: () => void
 }
 
 // One row per path; the "(N×)" suffix only appears for paths that cross the
@@ -93,6 +104,9 @@ export function SelectionInfoPanel({
   onUseAsStartNode,
   highlightedBubble = null,
   onHighlightBubble,
+  onSelectGene,
+  onGenePartsChange,
+  onZoomToGenePick,
 }: SelectionInfoPanelProps) {
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
@@ -167,12 +181,30 @@ export function SelectionInfoPanel({
                   <dd>
                     {selection.genes.map(gene => (
                       <div key={gene.heading}>
-                        <div>{gene.heading}</div>
+                        <div>
+                          {onSelectGene ? (
+                            <button
+                              type="button"
+                              className="selection-gene-link"
+                              title={`Show ${gene.gene.name}: its exons and introns, to highlight`}
+                              onClick={() => onSelectGene(gene.gene)}
+                            >
+                              {gene.heading}
+                            </button>
+                          ) : (
+                            gene.heading
+                          )}
+                        </div>
                         {gene.parts.map(part => (
                           <div key={part} className="selection-gene-part">
                             {part}
                           </div>
                         ))}
+                        {gene.note && (
+                          <div className="selection-gene-part selection-info-subtitle">
+                            {gene.note}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </dd>
@@ -228,7 +260,13 @@ export function SelectionInfoPanel({
           </>
         )}
 
-        {selection?.kind === 'gene' && <GeneDetails selection={selection} />}
+        {selection?.kind === 'gene' && (
+          <GeneDetails
+            selection={selection}
+            onPartsChange={onGenePartsChange}
+            onZoom={onZoomToGenePick}
+          />
+        )}
 
         {selection?.kind === 'edge' && (
           <>
@@ -392,10 +430,22 @@ function codingLength(gene: GeneRecord): number | null {
 
 function GeneDetails({
   selection,
+  onPartsChange,
+  onZoom,
 }: {
   selection: Extract<SelectionInfo, { kind: 'gene' }>
+  onPartsChange?: (parts: ReadonlySet<string>) => void
+  onZoom?: () => void
 }) {
-  const { gene, source, referencePathName, referenceNodeNames } = selection
+  const {
+    gene,
+    source,
+    referencePathName,
+    referenceNodeNames,
+    inGraph,
+    parts,
+    selectedParts,
+  } = selection
   const coding = codingLength(gene)
   const firstNode = referenceNodeNames[0]
   const lastNode = referenceNodeNames[referenceNodeNames.length - 1]
@@ -460,8 +510,109 @@ function GeneDetails({
                 ? `Node ${firstNode} on ${referencePathName}`
                 : `Nodes ${firstNode} to ${lastNode} on ${referencePathName}`}
           </div>
+          {inGraph && <div className="control-warning">{inGraph}</div>}
         </div>
       )}
+      {onPartsChange && referenceNodeNames.length > 0 && (
+        <GenePartPicker
+          parts={parts}
+          selected={selectedParts}
+          onChange={onPartsChange}
+          onZoom={onZoom}
+        />
+      )}
     </>
+  )
+}
+
+// Ticks for the whole gene or any of its exons and introns; the ticked ones
+// are outlined in the graph over exactly their bases.
+function GenePartPicker({
+  parts,
+  selected,
+  onChange,
+  onZoom,
+}: {
+  parts: (GeneStructurePart & { inGraph: boolean })[]
+  selected: ReadonlySet<string>
+  onChange: (parts: ReadonlySet<string>) => void
+  onZoom?: () => void
+}) {
+  // The whole gene and single parts are alternatives.
+  const toggle = (key: string) => {
+    if (key === 'gene') {
+      onChange(new Set(selected.has('gene') ? [] : ['gene']))
+      return
+    }
+    const next = new Set(selected)
+    next.delete('gene')
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    onChange(next)
+  }
+  const pickAll = (kind: GeneStructurePart['kind']) =>
+    onChange(
+      new Set(
+        parts.filter(part => part.kind === kind && part.inGraph).map(part => part.key),
+      ),
+    )
+
+  return (
+    <div className="selection-info-section">
+      <h5>Highlight in the graph</h5>
+      <label className="gene-part-row">
+        <input
+          type="checkbox"
+          checked={selected.has('gene')}
+          onChange={() => toggle('gene')}
+        />
+        Whole gene
+      </label>
+      {parts.length > 0 && (
+        <>
+          <div className="gene-part-actions">
+            <button type="button" onClick={() => pickAll('exon')}>
+              All exons
+            </button>
+            <button type="button" onClick={() => pickAll('intron')}>
+              All introns
+            </button>
+            <button type="button" onClick={() => onChange(new Set())}>
+              Clear
+            </button>
+          </div>
+          <div className="gene-part-list">
+            {parts.map(part => (
+              <label
+                key={part.key}
+                className={`gene-part-row${part.inGraph ? '' : ' dimmed'}`}
+                title={part.inGraph ? undefined : 'Outside this graph'}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(part.key)}
+                  disabled={!part.inGraph}
+                  onChange={() => toggle(part.key)}
+                />
+                <span className="gene-part-name">
+                  {part.kind === 'exon' ? 'Exon' : 'Intron'} {part.number}
+                </span>
+                <span className="gene-part-length">
+                  {(part.end - part.start).toLocaleString()} bp
+                </span>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+      <button
+        type="button"
+        className="gene-part-zoom"
+        onClick={onZoom}
+        disabled={!onZoom}
+      >
+        Zoom to highlighted
+      </button>
+    </div>
   )
 }

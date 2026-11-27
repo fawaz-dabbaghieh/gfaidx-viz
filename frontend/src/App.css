@@ -2213,6 +2213,66 @@ canvas {
   font-weight: 600;
 }
 
+.selection-gene-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #0066cc;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.app.dark-mode .selection-gene-link {
+  color: #7fb2ff;
+}
+
+.gene-part-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.gene-part-row.dimmed {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.gene-part-name {
+  flex: 1;
+}
+
+.gene-part-length {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.gene-part-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.gene-part-actions button,
+.gene-part-zoom {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.gene-part-list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.gene-part-zoom {
+  margin-top: 8px;
+}
+
 .selection-gene-part {
   padding-left: 10px;
 }

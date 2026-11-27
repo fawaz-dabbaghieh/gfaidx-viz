@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { GeneRecord } from './geneTrackBed'
 import {
   NOT_IN_GENE_COLOR,
+  describeGeneInGraph,
   describeGenesAtNode,
   geneColorAt,
+  geneInGraph,
+  geneStructure,
   getGeneNodeMap,
+  selectedGeneIntervals,
 } from './geneNodes'
 import { FIXTURE, graphFrom, tsv } from './testFixtures'
 import { getWalkIndex } from './walkIndex'
@@ -51,7 +55,11 @@ describe('getGeneNodeMap', () => {
   it('places each node in the gene and its exons and introns, from 5′', () => {
     expect(map.referencePath).toBe('REF#0#chr1')
     expect(map.geneCount).toBe(1)
-    const describe = (name: string) => describeGenesAtNode(map, node(name))
+    const describe = (name: string) =>
+      describeGenesAtNode(map, node(name)).map(({ heading, parts }) => ({
+        heading,
+        parts,
+      }))
     // On the '-' strand base 1 is the rightmost (108) and the leftmost exon
     // is the last one. Nodes 1 and 4 cross the intron's ends and stick out
     // of the gene by a base.
@@ -111,6 +119,39 @@ describe('getGeneNodeMap', () => {
     expect(startB).toBeLessThan(endB)
   })
 
+  it('tells which part of a gene the graph cuts off', () => {
+    // The graph's reference runs 100-110.
+    expect(map.span).toEqual({ start: 100, end: 110 })
+    expect(geneInGraph(map, genes[0]!)).toBeNull()
+    // A '-' gene running past the right edge loses its 5′ end.
+    const cut = geneInGraph(map, gene({ start: 105, end: 115, strand: '-' }))
+    expect(cut).toEqual({ from: 6, to: 10, length: 10, missing: '5′' })
+    expect(describeGeneInGraph(cut!)).toBe(
+      'Only bases 6–10 of 10 (50%) are in this graph; its 5′ end is outside it.',
+    )
+    expect(
+      geneInGraph(map, gene({ start: 90, end: 120, strand: '+' }))?.missing,
+    ).toBe('both')
+  })
+
+  it('lists exons and introns 5′ first, and the bases a pick covers', () => {
+    const structure = geneStructure(genes[0]!)
+    expect(structure.map(part => [part.key, part.start, part.end])).toEqual([
+      ['exon:1', 106, 109],
+      ['intron:1', 103, 106],
+      ['exon:2', 101, 103],
+    ])
+    expect(selectedGeneIntervals(genes[0]!, new Set(['gene']))).toEqual([
+      [101, 109],
+    ])
+    expect(
+      selectedGeneIntervals(genes[0]!, new Set(['exon:2', 'intron:1'])),
+    ).toEqual([
+      [103, 106],
+      [101, 103],
+    ])
+  })
+
   it("says why genes can't be placed", () => {
     expect(getGeneNodeMap(graph, [], 'REF#0#chr1')).toHaveProperty('message')
     const noCoordinates = graphFrom(tsv(['S 1 AAAA', 'P CHM13#0#chr1 1+ *']))
@@ -136,10 +177,12 @@ describe('getGeneNodeMap', () => {
     const rgfaMap = mapOf(rgfa, [gene({ name: 'R', start: 1005, end: 1010 })], '')
     const index = getWalkIndex(rgfa).nodeIndex
     // s3 is 1004-1008, the gene 1005-1010.
-    expect(describeGenesAtNode(rgfaMap, index.get('s3')!)).toEqual([
+    expect(describeGenesAtNode(rgfaMap, index.get('s3')!)).toMatchObject([
       {
         heading: 'R (+) · gene bases 1–3 of 5 (+1 bp outside the gene)',
         parts: [],
+        // The graph's reference runs 1000-1008, the gene to 1010.
+        note: 'Only bases 1–3 of 5 (60%) are in this graph; its 3′ end is outside it.',
       },
     ])
     expect(describeGenesAtNode(rgfaMap, index.get('s1')!)).toEqual([])

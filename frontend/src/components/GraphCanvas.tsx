@@ -37,9 +37,14 @@ import { type GeneRecord, stripPanSNPrefix } from '../utils/geneTrackBed'
 import {
   type GeneDescription,
   NOT_IN_GENE_COLOR,
+  describeGeneInGraph,
   describeGenesAtNode,
   geneColorAt,
+  geneInGraph,
+  geneStructure,
   getGeneNodeMap,
+  nodeCoordinate,
+  selectedGeneIntervals,
 } from '../utils/geneNodes'
 import { getSegmentIndex } from '../utils/segments'
 import {
@@ -335,6 +340,54 @@ const ROTATION_RADIANS_PER_PIXEL = 0.002
 const MAX_ROTATION_STEP = Math.PI / 15
 const NO_PATH_TRAVERSALS: Int32Array = new Int32Array(0)
 const NO_GENES: GeneRecord[] = []
+// A newly picked gene is highlighted whole; the info panel can narrow it to
+// exons and introns.
+const WHOLE_GENE: ReadonlySet<string> = new Set(['gene'])
+// The outline around a gene's picked parts: near black, or a soft slate on
+// the dark canvas, where white swamped the node colors.
+const GENE_PICK_OUTLINE = { light: '17,24,39', dark: '148,163,184' }
+
+// Strokes a polyline piece by piece, each piece with a gradient sampled from
+// styleAt(fraction along the whole line), for drawing that changes along a
+// node: its stretch of a gene, or the part of it that is picked.
+function strokeAlongLine(
+  ctx: CanvasRenderingContext2D,
+  points: { x: number; y: number }[],
+  styleAt: (fraction: number) => string,
+) {
+  const along = [0]
+  for (let i = 1; i < points.length; i++) {
+    along.push(
+      along[i - 1]! +
+        Math.hypot(points[i]!.x - points[i - 1]!.x, points[i]!.y - points[i - 1]!.y),
+    )
+  }
+  const total = along[along.length - 1]!
+  if (total < 1) {
+    ctx.strokeStyle = styleAt(0.5)
+    ctx.beginPath()
+    points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
+    ctx.stroke()
+    return
+  }
+  for (let i = 1; i < points.length; i++) {
+    const from = points[i - 1]!
+    const to = points[i]!
+    const pieceLength = along[i]! - along[i - 1]!
+    if (pieceLength <= 0) continue
+    const gradient = ctx.createLinearGradient(from.x, from.y, to.x, to.y)
+    const samples = Math.max(1, Math.min(256, Math.ceil(pieceLength / 3)))
+    for (let k = 0; k <= samples; k++) {
+      const t = k / samples
+      gradient.addColorStop(t, styleAt((along[i - 1]! + pieceLength * t) / total))
+    }
+    ctx.strokeStyle = gradient
+    ctx.beginPath()
+    ctx.moveTo(from.x, from.y)
+    ctx.lineTo(to.x, to.y)
+    ctx.stroke()
+  }
+}
 
 // Keep accumulated angles bounded so trigonometric calculations remain stable
 // after long rotation sessions.
@@ -463,6 +516,13 @@ function GraphCanvasComponent({
   // A clicked gene in the gene track, shown in the info panel instead of a
   // node or connection (only one of the three is ever selected).
   const [selectedGene, setSelectedGene] = useState<GeneRecord | null>(null)
+  // Which of the selected gene to outline: 'gene', or exon and intron keys
+  // ('exon:3'), picked in the info panel.
+  const [selectedGeneParts, setSelectedGeneParts] =
+    useState<ReadonlySet<string>>(WHOLE_GENE)
+  useEffect(() => {
+    setSelectedGeneParts(WHOLE_GENE)
+  }, [selectedGene])
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
@@ -1093,13 +1153,43 @@ function GraphCanvasComponent({
     setSelectedGene(null)
   }, [geneTrackAnnotations, referencePathName, linearLayout])
 
-  // For the Genes color scheme: where each reference node sits among the
-  // genes, so nodes in genes can be drawn in color along their length.
-  const geneDrawMap = useMemo(() => {
-    if (colorScheme !== 'genes') return null
+  // Where each reference node sits among the genes, for the Genes color
+  // scheme and a selected gene; only built once one of them needs it.
+  const geneMap = useMemo(() => {
+    if (
+      geneAnnotations.length === 0 ||
+      (colorScheme !== 'genes' && !selectedGene)
+    ) {
+      return null
+    }
     const result = getGeneNodeMap(graph, geneAnnotations, geneReferencePath)
     return 'map' in result ? result.map : null
-  }, [colorScheme, graph, geneAnnotations, geneReferencePath])
+  }, [colorScheme, graph, geneAnnotations, geneReferencePath, selectedGene])
+  // Nodes in genes are drawn in color along their length.
+  const geneDrawMap = colorScheme === 'genes' ? geneMap : null
+
+  // The selected gene's picked parts: the nodes they touch, and whether a
+  // point along a node is in them, so exactly those bases are outlined.
+  const genePick = useMemo(() => {
+    if (!selectedGene || !geneMap || selectedGeneParts.size === 0) return null
+    const intervals = selectedGeneIntervals(selectedGene, selectedGeneParts)
+    const nodes = new Set<number>()
+    geneMap.refStart.forEach((start, node) => {
+      if (start < 0) return
+      const end = start + geneMap.nodeLength[node]!
+      if (intervals.some(([from, to]) => from < end && to > start)) {
+        nodes.add(node)
+      }
+    })
+    const covers = (node: number, forwardFraction: number) => {
+      const coordinate = nodeCoordinate(geneMap, node, forwardFraction)
+      return (
+        coordinate !== null &&
+        intervals.some(([from, to]) => from <= coordinate && coordinate < to)
+      )
+    }
+    return { nodes, covers }
+  }, [geneMap, selectedGene, selectedGeneParts])
 
   // Colors depend on graph data and user settings, not the viewport. Cache
   // them so wheel/pan redraws only perform a map lookup per visible node.
@@ -2035,15 +2125,16 @@ function GraphCanvasComponent({
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
 
-      ctx.beginPath()
-      segments.forEach((segment, i) => {
-        const p = transformPoint(segment.x, segment.y)
-        if (i === 0) {
-          ctx.moveTo(p.x, p.y)
-        } else {
-          ctx.lineTo(p.x, p.y)
-        }
-      })
+      const points = segments.map(segment =>
+        transformPoint(segment.x, segment.y),
+      )
+      const tracePath = () => {
+        ctx.beginPath()
+        points.forEach((p, i) =>
+          i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y),
+        )
+      }
+      tracePath()
 
       if (isSelected) {
         ctx.strokeStyle = isDarkMode ? '#ffd54f' : '#b45309'
@@ -2059,74 +2150,49 @@ function GraphCanvasComponent({
         }
       }
 
+      // Gene-wise drawing samples the node's reference bases along its
+      // line; a '-' node is drawn along its reverse strand.
+      const segmentIndex =
+        geneDrawMap || genePick
+          ? getSegmentIndex(graph).indexByName.get(node.name)
+          : undefined
+      const forward = (fraction: number) =>
+        node.id.endsWith('-') ? 1 - fraction : fraction
+
+      // The selected gene's picked parts, outlined over exactly their bases.
+      if (genePick && segmentIndex !== undefined && genePick.nodes.has(segmentIndex)) {
+        const outline = GENE_PICK_OUTLINE[isDarkMode ? 'dark' : 'light']
+        const pickedNode = segmentIndex
+        ctx.lineWidth = contigThickness + 6
+        strokeAlongLine(ctx, points, fraction =>
+          genePick.covers(pickedNode, forward(fraction))
+            ? `rgba(${outline},1)`
+            : `rgba(${outline},0)`,
+        )
+      }
+
       ctx.lineWidth = isHovered ? contigThickness + 1 : contigThickness
-      const geneIndex = geneDrawMap
-        ? getSegmentIndex(graph).indexByName.get(node.name)
-        : undefined
       if (
         geneDrawMap &&
-        geneIndex !== undefined &&
-        geneDrawMap.hits[geneIndex] &&
+        segmentIndex !== undefined &&
+        geneDrawMap.hits[segmentIndex] &&
         !csvColorOverrides?.[node.id] &&
         !nodeColorOverrides?.[node.id]
       ) {
-        // Genes color scheme: the node is drawn in color along its length,
-        // so a long node shows its own stretch of the gene, with exons,
-        // introns and the gene's ends where they fall. Each piece of its
-        // line gets a gradient sampled from the reference bases it covers;
-        // a '-' node is drawn along its reverse strand.
-        const points = segments.map(segment =>
-          transformPoint(segment.x, segment.y),
-        )
-        const along = [0]
-        for (let i = 1; i < points.length; i++) {
-          along.push(
-            along[i - 1]! +
-              Math.hypot(
-                points[i]!.x - points[i - 1]!.x,
-                points[i]!.y - points[i - 1]!.y,
-              ),
-          )
-        }
-        const total = along[along.length - 1]!
-        const reverse = node.id.endsWith('-')
-        const map = geneDrawMap
-        const index = geneIndex
-        const colorAt = (fraction: number) => {
+        // Genes color scheme: in color along the node's length, so a long
+        // node shows its own stretch of the gene, with exons, introns and
+        // the gene's ends where they fall.
+        strokeAlongLine(ctx, points, fraction => {
           const [r, g, b] = geneColorAt(
-            map,
-            index,
-            reverse ? 1 - fraction : fraction,
+            geneDrawMap,
+            segmentIndex,
+            forward(fraction),
             isDarkMode,
           )
           return `rgb(${r},${g},${b})`
-        }
-        if (total < 1) {
-          ctx.strokeStyle = colorAt(0.5)
-          ctx.stroke()
-        } else {
-          for (let i = 1; i < points.length; i++) {
-            const from = points[i - 1]!
-            const to = points[i]!
-            const pieceLength = along[i]! - along[i - 1]!
-            if (pieceLength <= 0) continue
-            const gradient = ctx.createLinearGradient(from.x, from.y, to.x, to.y)
-            const samples = Math.max(1, Math.min(256, Math.ceil(pieceLength / 3)))
-            for (let k = 0; k <= samples; k++) {
-              const t = k / samples
-              gradient.addColorStop(
-                t,
-                colorAt((along[i - 1]! + pieceLength * t) / total),
-              )
-            }
-            ctx.strokeStyle = gradient
-            ctx.beginPath()
-            ctx.moveTo(from.x, from.y)
-            ctx.lineTo(to.x, to.y)
-            ctx.stroke()
-          }
-        }
+        })
       } else {
+        tracePath()
         ctx.strokeStyle = `rgb(${color.join(',')})`
         ctx.stroke()
       }
@@ -2649,6 +2715,7 @@ function GraphCanvasComponent({
     isDarkMode,
     getNodeColor,
     geneDrawMap,
+    genePick,
     csvColorOverrides,
     nodeColorOverrides,
     displayGraph,
@@ -3448,20 +3515,76 @@ function GraphCanvasComponent({
   // node-to-bp spans the ruler uses.
   const selectedGeneInfo = useMemo((): SelectionInfo | null => {
     if (!selectedGene) return null
-    const spans = referencePathCoordinates?.backboneNodeSpans ?? []
+    if (!geneMap) {
+      const spans = referencePathCoordinates?.backboneNodeSpans ?? []
+      return {
+        kind: 'gene',
+        gene: selectedGene,
+        source: geneTrackSource,
+        referencePathName,
+        referenceNodeNames: spans
+          .filter(
+            span =>
+              span.bpEnd > selectedGene.start && span.bpStart < selectedGene.end,
+          )
+          .map(span => span.bareName),
+        inGraph: null,
+        parts: [],
+        selectedParts: selectedGeneParts,
+      }
+    }
+    // Its reference nodes in reference order, from the gene map, so this
+    // works in any layout.
+    const { names } = getSegmentIndex(graph)
+    const nodes: number[] = []
+    geneMap.hits.forEach((hits, node) => {
+      if (hits?.some(hit => hit.gene === selectedGene)) nodes.push(node)
+    })
+    nodes.sort((a, b) => geneMap.refStart[a]! - geneMap.refStart[b]!)
+    const partInGraph = geneInGraph(geneMap, selectedGene)
     return {
       kind: 'gene',
       gene: selectedGene,
       source: geneTrackSource,
-      referencePathName,
-      referenceNodeNames: spans
-        .filter(
-          span =>
-            span.bpEnd > selectedGene.start && span.bpStart < selectedGene.end,
-        )
-        .map(span => span.bareName),
+      referencePathName: geneMap.referencePath,
+      referenceNodeNames: nodes.map(node => names[node]!),
+      inGraph: partInGraph && describeGeneInGraph(partInGraph),
+      parts: geneStructure(selectedGene).map(part => ({
+        ...part,
+        inGraph: part.start < geneMap.span.end && part.end > geneMap.span.start,
+      })),
+      selectedParts: selectedGeneParts,
     }
-  }, [selectedGene, referencePathCoordinates, geneTrackSource, referencePathName])
+  }, [
+    selectedGene,
+    selectedGeneParts,
+    geneMap,
+    graph,
+    referencePathCoordinates,
+    geneTrackSource,
+    referencePathName,
+  ])
+
+  // Zooms to the selected gene's picked parts.
+  const handleZoomToGenePick = useCallback(() => {
+    if (!genePick) return
+    const { indexByName } = getSegmentIndex(graph)
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    for (const displayNode of displayGraph.nodes) {
+      const index = indexByName.get(displayNode.node.name)
+      if (index === undefined || !genePick.nodes.has(index)) continue
+      for (const segment of displayNode.segments) {
+        minX = Math.min(minX, segment.x)
+        maxX = Math.max(maxX, segment.x)
+        minY = Math.min(minY, segment.y)
+        maxY = Math.max(maxY, segment.y)
+      }
+    }
+    if (minX !== Infinity) focusViewOnBox(minX, maxX, minY, maxY, 1.5)
+  }, [displayGraph.nodes, focusViewOnBox, genePick, graph])
 
   return (
     <div className="graph-canvas-with-info">
@@ -3527,6 +3650,18 @@ function GraphCanvasComponent({
                           {part}
                         </div>
                       ))}
+                      {gene.note && (
+                        <div
+                          style={{
+                            paddingLeft: '10px',
+                            opacity: 0.8,
+                            whiteSpace: 'normal',
+                            maxWidth: '320px',
+                          }}
+                        >
+                          {gene.note}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -3785,6 +3920,9 @@ function GraphCanvasComponent({
         onUseAsStartNode={onUseAsStartNode}
         highlightedBubble={highlightedBubble}
         onHighlightBubble={onHighlightBubble}
+        onSelectGene={setSelectedGene}
+        onGenePartsChange={setSelectedGeneParts}
+        onZoomToGenePick={genePick ? handleZoomToGenePick : undefined}
       />
     </div>
   )

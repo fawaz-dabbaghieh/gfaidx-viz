@@ -21,7 +21,7 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { NodeStyleCsvPanel } from './components/NodeStyleCsvPanel'
 import { BandageLayoutWorker } from './utils/BandageLayoutWorker'
 import { findBubbles, type BubbleSet } from './utils/bubbleGun'
-import { getGeneNodeMap } from './utils/geneNodes'
+import { geneInGraph, getGeneNodeMap } from './utils/geneNodes'
 import { getRGFAMaxRank } from './utils/rgfaRank'
 import { getWalkIndex, noHaplotypesMessage } from './utils/walkIndex'
 import { parseGFA } from './utils/gfaParser'
@@ -1525,6 +1525,17 @@ function App({ worker, onStopLayout }: AppProps) {
       ? {
           referencePath: geneResult.map.referencePath,
           geneCount: geneResult.map.geneCount,
+          // Genes the graph's edge cuts off, e.g. "PLG: 23%, 3′ end outside".
+          cutOff: geneResult.map.genes.flatMap(gene => {
+            const part = geneInGraph(geneResult.map, gene)
+            if (!part) return []
+            const percent = Math.round(
+              ((part.to - part.from + 1) / part.length) * 100,
+            )
+            const ends =
+              part.missing === 'both' ? 'both ends' : `${part.missing} end`
+            return [`${gene.name}: ${percent}%, ${ends} outside`]
+          }),
         }
       : { message: geneResult.message }
 
