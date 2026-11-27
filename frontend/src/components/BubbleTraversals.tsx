@@ -6,6 +6,7 @@ import {
   type Bubble,
   bubbleId,
 } from '../utils/bubbleGun'
+import { aboutLines } from '../utils/downloadAbout'
 import { traversalsToFasta } from '../utils/fasta'
 import {
   type Traversal,
@@ -88,6 +89,8 @@ interface BubbleTraversalsProps {
   isDarkMode: boolean
   pickedTraversalId: number | null
   onPickTraversal: (traversal: PickedTraversal | null) => void
+  // Where the graph came from, for the download headers.
+  origin: string[]
   onDownload: (content: string | string[], filename: string) => void
 }
 
@@ -99,6 +102,7 @@ export function BubbleTraversals({
   isDarkMode,
   pickedTraversalId,
   onPickTraversal,
+  origin,
   onDownload,
 }: BubbleTraversalsProps) {
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({
@@ -193,6 +197,7 @@ export function BubbleTraversals({
                 result,
                 graph.name,
                 referencePath,
+                aboutLines(origin),
               ),
               `${baseName}.bubble${bubbleId(bubble)}.traversals.tsv`,
             )

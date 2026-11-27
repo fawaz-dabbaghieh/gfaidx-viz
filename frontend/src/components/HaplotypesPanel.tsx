@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { Graph } from '../types'
+import { aboutLines } from '../utils/downloadAbout'
 import { haplotypesToFasta } from '../utils/fasta'
 import {
   type Haplotype,
@@ -10,6 +11,7 @@ import {
   noHaplotypesMessage,
   referenceCovered,
   resolveReferencePath,
+  splitCauses,
 } from '../utils/walkIndex'
 import { HelpIcon } from './HelpIcon'
 import { SearchSelect } from './SearchSelect'
@@ -107,8 +109,20 @@ interface HaplotypesPanelProps {
   referencePath: string | null
   preferredReferencePath: string
   onReferencePathChange: (pathName: string) => void
+  // Where the graph came from, for the download headers.
+  origin: string[]
+  // The haplotype gap of the all-haplotypes query the graph came from, in
+  // bases; null for other graphs.
+  queryHaplotypeGapBp: number | null
   onDownload: (content: string | string[], filename: string) => void
 }
+
+const formatBases = (bases: number) =>
+  bases >= 1e6 && bases % 1e6 === 0
+    ? `${bases / 1e6} mb`
+    : bases >= 1e3 && bases % 1e3 === 0
+      ? `${bases / 1e3} kb`
+      : `${bases.toLocaleString()} bp`
 
 export function HaplotypesPanel({
   graph,
@@ -116,6 +130,8 @@ export function HaplotypesPanel({
   referencePath,
   preferredReferencePath,
   onReferencePathChange,
+  origin,
+  queryHaplotypeGapBp,
   onDownload,
 }: HaplotypesPanelProps) {
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({
@@ -191,6 +207,9 @@ export function HaplotypesPanel({
   }
 
   const splitCount = walkIndex.haplotypes.filter(h => h.clipped).length
+  const causes = splitCauses(walkIndex, queryHaplotypeGapBp)
+  const gapText =
+    queryHaplotypeGapBp === null ? null : formatBases(queryHaplotypeGapBp)
   const baseName = graph.name.replace(/\.gfa[12]?(\.gz)?$/i, '')
   const sortBy = (key: SortKey) =>
     setSort(current =>
@@ -230,7 +249,12 @@ export function HaplotypesPanel({
           className="table-download-button"
           onClick={() =>
             onDownload(
-              haplotypesToTsv(walkIndex, comparison, graph.name),
+              haplotypesToTsv(
+                walkIndex,
+                comparison,
+                graph.name,
+                aboutLines(origin),
+              ),
               `${baseName}.haplotypes.tsv`,
             )
           }
@@ -264,10 +288,42 @@ export function HaplotypesPanel({
         <div className="control-warning">
           {splitCount.toLocaleString()}{' '}
           {splitCount === 1 ? 'haplotype is' : 'haplotypes are'} split into
-          several walks, most likely by the query's Haplotype Gap, so the
-          sequence between {splitCount === 1 ? 'its' : 'their'} walks is
-          missing here. Query again with a larger Haplotype Gap to keep{' '}
-          {splitCount === 1 ? 'it' : 'them'} whole.
+          several walks, so the sequence between{' '}
+          {splitCount === 1 ? 'its' : 'their'} walks is missing here:
+          <ul className="haplotypes-panel-causes">
+            {causes.gap > 0 && (
+              <li>
+                {causes.gap.toLocaleString()} by the query's Haplotype Gap (
+                {gapText}): query again with a larger one, at most 1 mb, to
+                keep {causes.gap === 1 ? 'it' : 'them'} whole.
+              </li>
+            )}
+            {causes.contigs > 0 && (
+              <li>
+                {causes.contigs.toLocaleString()} lie on several contigs: the
+                assembly is broken in this region.
+              </li>
+            )}
+            {causes.graph > 0 && (
+              <li>
+                {causes.graph.toLocaleString()} miss only stretches shorter
+                than the query's Haplotype Gap ({gapText}), so the graph itself
+                stores {causes.graph === 1 ? 'it' : 'them'} as separate walks
+                (e.g. a clipped Minigraph-Cactus graph leaves out long
+                unaligned sequence); a larger gap won't help.
+              </li>
+            )}
+            {causes.unknown > 0 && (
+              <li>
+                {causes.unknown.toLocaleString()}: the cause can't be told,{' '}
+                {queryHaplotypeGapBp === null
+                  ? 'as this graph is not from an all-haplotypes query.'
+                  : 'as their walks have no coordinates.'}
+              </li>
+            )}
+          </ul>
+          Hover a haplotype's number of walks for its contigs and largest
+          missing stretch.
         </div>
       )}
       {walkIndex.coordinateMismatches.length > 0 && (
@@ -324,6 +380,14 @@ export function HaplotypesPanel({
                 </td>
                 <td
                   className={`numeric${row.haplotype.clipped ? ' haplotypes-panel-split' : ''}`}
+                  title={
+                    row.haplotype.clipped
+                      ? `On ${row.haplotype.contigs} ${row.haplotype.contigs === 1 ? 'contig' : 'contigs'}` +
+                        (row.haplotype.largestGapBp
+                          ? `; largest missing stretch ${row.haplotype.largestGapBp.toLocaleString()} bp`
+                          : '')
+                      : undefined
+                  }
                 >
                   {row.haplotype.walks.length}
                 </td>

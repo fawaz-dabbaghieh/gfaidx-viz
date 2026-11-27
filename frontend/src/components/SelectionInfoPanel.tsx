@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { Fragment, useRef } from 'react'
 import type { GraphNode } from '../types'
 import { BUBBLE_TYPE_LABELS, type Bubble, bubbleId } from '../utils/bubbleGun'
 import type { EdgePathGroup } from '../utils/displayGraph'
@@ -370,9 +370,18 @@ function BubbleDetails({
       {nesting.length > 0 && (
         <>
           <div className="selection-info-subtitle">
-            Inside {nesting.length}, innermost first
+            Inside {nesting.length}{' '}
+            {nesting.length === 1 ? 'bubble' : 'bubbles'}: the innermost on
+            top, each nested in the one below it
           </div>
-          {nesting.map(row)}
+          {nesting.map((bubble, i) => (
+            <Fragment key={bubble.index}>
+              {row(bubble)}
+              <div className="selection-bubble-arrow" aria-hidden="true">
+                {i + 1 < nesting.length ? '↓ inside' : 'top level'}
+              </div>
+            </Fragment>
+          ))}
         </>
       )}
       {endOf.length > 0 && (

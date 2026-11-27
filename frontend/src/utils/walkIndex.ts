@@ -9,6 +9,7 @@
 // query than about the assembly, so no statistic is taken from walk counts.
 
 import type { Graph, GraphPath } from '../types'
+import { commentLines } from './downloadAbout'
 import { getRGFAMaxRank } from './rgfaRank'
 import { getSegmentIndex } from './segments'
 
@@ -32,11 +33,14 @@ export interface Haplotype {
   hap: string
   walks: HaploWalk[]
   seqLen: number
-  // More than one walk, e.g. cut by the query's haplotype gap.
+  // More than one walk (see splitCauses).
   clipped: boolean
-  // Sequence between consecutive walks on the same contig, or null when a
-  // walk has no coordinates.
+  // Sequence between consecutive walks on the same contig, in all and the
+  // largest stretch, or null when a walk has no coordinates.
   gapBp: number | null
+  largestGapBp: number | null
+  // Contigs its walks lie on.
+  contigs: number
 }
 
 export interface WalkIndex {
@@ -195,15 +199,19 @@ function buildWalkIndex(graph: Graph): WalkIndex {
         (a.start ?? 0) - (b.start ?? 0),
     )
     let gapBp: number | null = 0
+    let largestGapBp: number | null = 0
     for (let i = 1; i < walks.length; i++) {
       const previous = walks[i - 1]!
       const walk = walks[i]!
       if (previous.end === null || walk.start === null) {
         gapBp = null
+        largestGapBp = null
         break
       }
       if (walk.contig === previous.contig) {
-        gapBp += Math.max(0, walk.start - previous.end)
+        const gap = Math.max(0, walk.start - previous.end)
+        gapBp += gap
+        largestGapBp = Math.max(largestGapBp!, gap)
       }
     }
 
@@ -215,6 +223,8 @@ function buildWalkIndex(graph: Graph): WalkIndex {
       seqLen: walks.reduce((sum, walk) => sum + walk.seqLen, 0),
       clipped: walks.length > 1,
       gapBp,
+      largestGapBp,
+      contigs: new Set(walks.map(walk => walk.contig)).size,
     })
   }
 
@@ -228,6 +238,38 @@ function buildWalkIndex(graph: Graph): WalkIndex {
     visitCount,
     coordinateMismatches,
   }
+}
+
+// Why haplotypes are split into several walks, so the sequence between
+// their walks is missing:
+// - gap: a stretch between two of its walks is longer than the query's
+//   haplotype gap, so a larger gap would keep it whole;
+// - contigs: its walks lie on several contigs, the assembly being broken
+//   there;
+// - graph: every stretch is shorter than the query's gap, so the graph
+//   itself stores it as separate walks (e.g. Minigraph-Cactus's clipped
+//   graphs leave long unaligned sequence out);
+// - unknown: no coordinates, or the graph isn't from an all-haplotypes query
+//   whose gap is known.
+export function splitCauses(
+  walkIndex: WalkIndex,
+  queryGapBp: number | null,
+): Record<'gap' | 'contigs' | 'graph' | 'unknown', number> {
+  const causes = { gap: 0, contigs: 0, graph: 0, unknown: 0 }
+  for (const haplotype of walkIndex.haplotypes) {
+    if (!haplotype.clipped) continue
+    const largest = haplotype.largestGapBp
+    if (largest !== null && queryGapBp !== null && largest > queryGapBp) {
+      causes.gap++
+    } else if (haplotype.contigs > 1) {
+      causes.contigs++
+    } else if (largest !== null && queryGapBp !== null) {
+      causes.graph++
+    } else {
+      causes.unknown++
+    }
+  }
+  return causes
 }
 
 // Why the haplotype features (sharing, traversals, the Haplotypes tab) have
@@ -392,14 +434,17 @@ export function referenceCovered(
     : 0
 }
 
+// `about`: where the graph came from (see downloadAbout), under the title.
 export function haplotypesToTsv(
   walkIndex: WalkIndex,
   comparison: ReferenceComparison | null,
   graphName: string,
+  about: string[] = [],
 ): string {
   const lines = [
     `# Haplotypes in ${graphName}` +
       (comparison ? `, compared with the reference ${comparison.pathName}` : ''),
+    ...commentLines(about),
     [
       'haplotype',
       'sample',

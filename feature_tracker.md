@@ -90,16 +90,25 @@ Tick each item once it is done and verified.
       column (e.g. population) to sort by
 - [ ] F4: walk-rows track (reference on top, one row per haplotype);
       look at clustermap.js `refactor` branch for Mauve-style ribbons
-- [ ] F6: click a node: its site and nesting stack (see BubbleGun2 above)
+- [x] F6: click a node: its nesting stack in the info panel, one box per
+      bubble, innermost on top, each with an arrow down to the bubble it is
+      nested in, the last marked "top level"
 - [x] F7: traversals through a site, both ends in either order, read
       between the site's own ends (so nested sites are included); list for
       small sites, length distribution for large. LPA KIV-2 site: 464/464
       haplotypes, 457 traversals (451 singletons), 5-172,073 bp, r = 0.9928
       with seqLen. `utils/traversals.ts`, tested with Vitest
-- [ ] F7 follow-up (maybe): group a superbubble's traversals by the route
-      taken through each nested bubble instead of the exact node sequence
-- [ ] Exports: a download button per table, with graph, window, reference
-      and gap in a header comment
+- [ ] F7 follow-up (maybe): "structural" traversals: ignore nested bubbles
+      below a size threshold (e.g. 50 bp), so haplotypes differing only by
+      SNPs inside a superbubble share a traversal (KIV-2: 457 exact
+      traversals would collapse to a few copy structures)
+- [x] Exports: every table download (bubbles TSV/JSON, traversals TSV,
+      haplotypes TSV) starts with where the graph came from: the gfaidx
+      graph, region or start node, method (all haplotypes + haplotype gap,
+      or BFS + max nodes), "with coordinates", or the uploaded file / URL,
+      plus the download date; TSVs as '#' lines under the title (which
+      names the reference), the JSON as an "about" field. FASTA has no
+      comment lines, so its records carry only their own names
 
 ## FASTA downloads
 
@@ -142,6 +151,26 @@ it (SN).
       segments
 - [x] Rename the "Copy #" / copy-number track to traversal multiplicity
       (button "Multiplicity"; internal names still say copyNumber)
+- [x] Default haplotype gap 10kb -> 50kb (AMY1C: 15 of 464 haplotypes split
+      instead of 39; 30kb gives the same there) and auto layout up to 12,000
+      nodes instead of 10,000, so the AMY1C example (10,638 nodes) is laid
+      out straight away
+- [x] Split-haplotype warning (Haplotypes tab) says why, per cause: the
+      query's haplotype gap (a larger one helps), walks on several contigs
+      (broken assembly), or only stretches shorter than the gap missing
+      (the graph itself stores separate walks, e.g. a clipped
+      Minigraph-Cactus graph; a larger gap won't help). AMY1C at 50kb: 4 on
+      several contigs, 11 from the graph, so even 1mb leaves them split.
+      Each split haplotype's walk count shows its contigs and largest
+      missing stretch on hover
+- [ ] "No gap" all-haplotypes queries: gfaidx keeps whole haplotypes
+      without --haplotype_gap, but the backend (MMseqs2-App gfaidxjob.go)
+      fills in 10kb and caps at 1mb; would need e.g. haplotype_gap "none"
+- [ ] Add the unclipped (full) HPRC v2.1 Minigraph-Cactus graph to the
+      backend's graph list, if it is already indexed (Fawaz to check)
+- [x] Genes shown on load: once per graph and gene set, the Genes color
+      scheme is picked when a gene lies on the reference; a scheme chosen
+      afterwards sticks
 - [x] Uploaded PGGB graphs: P-lines named "sample#hap#contig:start-end"
       (or "sample#contig:start-end") get coordinates when the range is as
       long as the path, so genes (and the linear-layout ruler) work on

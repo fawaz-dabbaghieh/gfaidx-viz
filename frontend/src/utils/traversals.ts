@@ -10,6 +10,7 @@
 
 import type { Graph } from '../types'
 import type { Bubble } from './bubbleGun'
+import { commentLines } from './downloadAbout'
 import { getSegmentIndex } from './segments'
 import { getWalkIndex, type WalkIndex } from './walkIndex'
 
@@ -226,11 +227,14 @@ export function traversalsToTsv(
   result: BubbleTraversals,
   graphName: string,
   referencePathName: string | null,
+  // Where the graph came from (see downloadAbout), under the title.
+  about: string[] = [],
 ): string {
   const lines = [
     `# Traversals through bubble ${bubble.index + 1} ` +
       `(${bubble.source} to ${bubble.sink}) in ${graphName}` +
       (referencePathName ? `, reference ${referencePathName}` : ''),
+    ...commentLines(about),
     [
       'traversal',
       'haplotypes',

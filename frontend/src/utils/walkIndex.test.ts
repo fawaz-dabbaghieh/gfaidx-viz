@@ -11,6 +11,7 @@ import {
   pickReferencePath,
   haplotypeOnReference,
   referenceCovered,
+  splitCauses,
 } from './walkIndex'
 import { FIXTURE, graphFrom, tsv } from './testFixtures'
 
@@ -129,6 +130,22 @@ describe('getWalkIndex', () => {
     expect(without.key).toBe('HG4#1')
     expect(without.walks[0]!.start).toBeNull()
     expect(without.gapBp).toBeNull()
+  })
+
+  it('tells why haplotypes are split into several walks', () => {
+    // HG2#1 misses 15 bp between its two chr1 walks; HG5#1 lies on two
+    // contigs.
+    const split = getWalkIndex(
+      graphFrom(FIXTURE + '\n' + tsv(['W HG5 1 chr2 0 5 >1>2', 'W HG5 1 chr3 0 5 >4'])),
+    )
+    const hg2 = split.haplotypes.find(h => h.key === 'HG2#1')!
+    expect([hg2.contigs, hg2.largestGapBp]).toEqual([1, 15])
+    expect(split.haplotypes.find(h => h.key === 'HG5#1')!.contigs).toBe(2)
+    // A 10 bp query gap split HG2#1; with 20 bp the graph itself did.
+    expect(splitCauses(split, 10)).toEqual({ gap: 1, contigs: 1, graph: 0, unknown: 0 })
+    expect(splitCauses(split, 20)).toEqual({ gap: 0, contigs: 1, graph: 1, unknown: 0 })
+    // Not from an all-haplotypes query: only the contigs can be told.
+    expect(splitCauses(split, null)).toEqual({ gap: 0, contigs: 1, graph: 0, unknown: 1 })
   })
 
   it('handles a graph without paths', () => {

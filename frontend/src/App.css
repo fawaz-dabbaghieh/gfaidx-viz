@@ -2052,6 +2052,11 @@ canvas {
   font-weight: 600;
 }
 
+.haplotypes-panel-causes {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
 .haplotypes-panel-split {
   color: #b45309;
   font-weight: 600;
@@ -2211,6 +2216,17 @@ canvas {
   margin-bottom: 3px;
   font-size: 12px;
   font-weight: 600;
+}
+
+.selection-bubble-arrow {
+  margin: 2px 0 4px;
+  color: #777;
+  font-size: 11px;
+  text-align: center;
+}
+
+.app.dark-mode .selection-bubble-arrow {
+  color: #999;
 }
 
 .selection-gene-link {

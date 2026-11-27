@@ -3,6 +3,7 @@
 // uses the graph's topology (segments and links), never its paths.
 
 import type { Graph } from '../types'
+import { commentLines } from './downloadAbout'
 import { getSegmentIndex } from './segments'
 
 export type BubbleType = 'simple' | 'super' | 'insertion'
@@ -270,9 +271,15 @@ export function bubbleId(bubble: Bubble): number {
   return bubble.index + 1
 }
 
-export function bubblesToTsv(bubbleSet: BubbleSet, graphName: string): string {
+// `about`: where the graph came from (see downloadAbout), under the title.
+export function bubblesToTsv(
+  bubbleSet: BubbleSet,
+  graphName: string,
+  about: string[] = [],
+): string {
   const lines = [
     `# Bubbles found by BubbleGun2 in ${graphName}`,
+    ...commentLines(about),
     [
       'id',
       'type',
@@ -305,9 +312,14 @@ export function bubblesToTsv(bubbleSet: BubbleSet, graphName: string): string {
   return lines.join('\n') + '\n'
 }
 
-export function bubblesToJson(bubbleSet: BubbleSet, graphName: string): string {
+export function bubblesToJson(
+  bubbleSet: BubbleSet,
+  graphName: string,
+  about: string[] = [],
+): string {
   return JSON.stringify({
     graph: graphName,
+    about,
     bubbles: bubbleSet.bubbles.map(bubble => ({
       id: bubbleId(bubble),
       type: bubble.type,

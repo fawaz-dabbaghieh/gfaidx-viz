@@ -2,9 +2,11 @@
 // result is too large for the server or the browser. It mirrors the flags
 // the backend adds (see gfaidxCommand in the MMseqs2-App backend).
 
-// The backend's default --haplotype_gap for all-haplotype queries, and its
-// cap on a chosen one (gfaidxMaxHaplotypeGapBases).
-export const DEFAULT_HAPLOTYPE_GAP = '10kb'
+// The app's default --haplotype_gap for all-haplotype queries (always sent,
+// so the backend's own default doesn't apply), and the backend's cap on a
+// chosen one (gfaidxMaxHaplotypeGapBases). 50kb rather than 10kb: at AMY1C
+// it splits 15 of 464 haplotypes into several walks instead of 39.
+export const DEFAULT_HAPLOTYPE_GAP = '50kb'
 const MAX_HAPLOTYPE_GAP_BASES = 1_000_000
 const HAPLOTYPE_GAP = /^(0|[1-9][0-9]*)(bp|kb|mb|gb)?$/i
 const GAP_UNIT_BASES: Record<string, number> = { '': 1, bp: 1, kb: 1e3, mb: 1e6, gb: 1e9 }
@@ -15,10 +17,18 @@ export function normalizeHaplotypeGap(gap: string): string {
   return gap.replace(/[\s,]+/g, '') || DEFAULT_HAPLOTYPE_GAP
 }
 
-export function haplotypeGapError(gap: string): string | null {
+// A normalized gap ("50kb", "5000") in bases, or null when it isn't one.
+export function haplotypeGapBases(gap: string): number | null {
   const match = HAPLOTYPE_GAP.exec(gap)
-  if (!match) return 'Haplotype gap must be a number of bases, e.g. 10kb or 5000'
-  const bases = Number(match[1]) * (GAP_UNIT_BASES[(match[2] ?? '').toLowerCase()] ?? 1)
+  if (!match) return null
+  return Number(match[1]) * (GAP_UNIT_BASES[(match[2] ?? '').toLowerCase()] ?? 1)
+}
+
+export function haplotypeGapError(gap: string): string | null {
+  const bases = haplotypeGapBases(gap)
+  if (bases === null) {
+    return 'Haplotype gap must be a number of bases, e.g. 10kb or 5000'
+  }
   return bases > MAX_HAPLOTYPE_GAP_BASES
     ? 'Haplotype gap must be at most 1mb on the server'
     : null

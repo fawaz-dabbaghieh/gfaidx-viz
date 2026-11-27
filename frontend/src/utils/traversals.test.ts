@@ -107,4 +107,18 @@ describe('findTraversals', () => {
     expect(lines[2]).toBe('T1\t3\t3\t2\t1\t1\tno\t>3\tHG1#1,HG1#2,HG3#1')
     expect(lines[3]).toBe('T2\t2\t2\t1\t1\t0\tyes\t>2\tREF#0,HG3#1')
   })
+
+  it('writes where the graph came from under the title', () => {
+    const result = findTraversals(graph, BUBBLE, null)!
+    const lines = traversalsToTsv(walkIndex, BUBBLE, result, 'test.gfa', null, [
+      'graph: hprc.gfa.gz',
+      'region: CHM13 chr1:100-200',
+    ]).split('\n')
+    expect(lines.slice(0, 4)).toEqual([
+      '# Traversals through bubble 1 (1 to 4) in test.gfa',
+      '# graph: hprc.gfa.gz',
+      '# region: CHM13 chr1:100-200',
+      'traversal\thaplotypes\tpasses\tlength_bp\tnodes\tvs_reference_bp\treference\troute\thaplotype_names',
+    ])
+  })
 })

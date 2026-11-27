@@ -10,6 +10,7 @@ import {
   bubblesToJson,
   bubblesToTsv,
 } from '../utils/bubbleGun'
+import { aboutLines } from '../utils/downloadAbout'
 import { BubbleTraversals, type PickedTraversal } from './BubbleTraversals'
 import { useRowBatches } from './useRowBatches'
 
@@ -45,6 +46,8 @@ interface BubblesPanelProps {
   preferredReferencePath: string
   pickedTraversalId: number | null
   onPickTraversal: (traversal: PickedTraversal | null) => void
+  // Where the graph came from, for the download headers.
+  origin: string[]
   onDownload: (content: string | string[], filename: string) => void
 }
 
@@ -59,6 +62,7 @@ export function BubblesPanel({
   preferredReferencePath,
   pickedTraversalId,
   onPickTraversal,
+  origin,
   onDownload,
 }: BubblesPanelProps) {
   const graphName = graph?.name ?? null
@@ -158,7 +162,10 @@ export function BubblesPanel({
           type="button"
           className="table-download-button"
           onClick={() =>
-            onDownload(bubblesToTsv(bubbles, graphName), `${baseName}.bubbles.tsv`)
+            onDownload(
+              bubblesToTsv(bubbles, graphName, aboutLines(origin)),
+              `${baseName}.bubbles.tsv`,
+            )
           }
         >
           Download TSV
@@ -168,7 +175,7 @@ export function BubblesPanel({
           className="table-download-button"
           onClick={() =>
             onDownload(
-              bubblesToJson(bubbles, graphName),
+              bubblesToJson(bubbles, graphName, aboutLines(origin)),
               `${baseName}.bubbles.json`,
             )
           }
@@ -280,6 +287,7 @@ export function BubblesPanel({
           isDarkMode={isDarkMode}
           pickedTraversalId={pickedTraversalId}
           onPickTraversal={onPickTraversal}
+          origin={origin}
           onDownload={onDownload}
         />
       )}

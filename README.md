@@ -21,7 +21,7 @@ Pick one of the indexed graphs hosted on the server, then extract a subgraph:
 - **Coordinate region**: a range on a coordinate track, typed as
   `name:start-end`, e.g. `chr1:103642902-103751695`, or with a path name such
   as `CHM13#0#chr1:103642902-103751695`. Optionally include all haplotypes
-  that pass through it; the haplotype gap (default 10 kb) sets where a
+  that pass through it; the haplotype gap (default 50 kb) sets where a
   haplotype that passes through the region at distant places, such as in
   repeats, is split.
 - **Gene name**: type a gene name, e.g. `AMY1C`, to get its GRCh38 or CHM13
@@ -37,7 +37,7 @@ command that extracts it from a downloaded copy of the indexed graph.
 **Download Indexed Graphs**, at the top right, lists every indexed graph in
 the public bucket `s3://steineggerlab/gfaidx/` with its size, a download
 link, and the commands to fetch and unpack it.
-Results of up to 10,000 nodes are laid out straight away; larger ones wait
+Results of up to 12,000 nodes are laid out straight away; larger ones wait
 for you to press Compute Layout.
 
 ![The Query tab](docs/images/query.png)

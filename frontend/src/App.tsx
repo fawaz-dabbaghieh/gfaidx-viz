@@ -43,6 +43,7 @@ import {
   DEFAULT_HAPLOTYPE_GAP,
   gfaidxRegionCommand,
   gfaidxSubgraphCommand,
+  haplotypeGapBases,
   haplotypeGapError,
   normalizeHaplotypeGap,
   serverSizeLimitMessage,
@@ -124,8 +125,9 @@ const LOCAL_GRAPH_ID_PREFIX = '__local_graph__:'
 const LARGE_GRAPH_NODE_WARNING_THRESHOLD = 50000
 
 // Graphs up to this many nodes are laid out as soon as they're loaded; larger
-// ones wait for the user to press Compute Layout.
-const AUTO_LAYOUT_MAX_NODES = 10000
+// ones wait for the user to press Compute Layout. 12,000 takes in the AMY1C
+// example (10,638 nodes with the default haplotype gap).
+const AUTO_LAYOUT_MAX_NODES = 12000
 
 // The canvas fills the graph section's width (minus the info panel) and about
 // one screen of height. CHROME is the section's own header and padding.
@@ -156,6 +158,13 @@ const INT32_MAX = 2_147_483_647
 // A fixed empty list for a hidden gene track, so the memoized canvas isn't
 // handed a new array (and re-rendered) on every App render.
 const NO_GENES: GeneRecord[] = []
+
+// Where the current graph came from: "key: value" lines for the download
+// headers, and the haplotype gap (in bases) of an all-haplotypes query.
+interface GraphOrigin {
+  lines: string[]
+  haplotypeGapBp?: number | null
+}
 
 function App({ worker, onStopLayout }: AppProps) {
   const [layoutOptions, setLayoutOptions] = useState<LayoutOptions>({
@@ -251,6 +260,9 @@ function App({ worker, onStopLayout }: AppProps) {
   // backend extraction. The result stays fetchable from the backend by this
   // ticket, so "Download GFA" re-fetches it instead of holding a second copy
   // of (potentially large) GFA text in memory for the whole session.
+  // Where currentGraph came from ("graph: …", "region: …", "method: …"),
+  // written at the top of every table download.
+  const [graphOrigin, setGraphOrigin] = useState<GraphOrigin>({ lines: [] })
   const [currentGraphTicket, setCurrentGraphTicket] = useState<string | null>(
     null,
   )
@@ -762,6 +774,10 @@ function App({ worker, onStopLayout }: AppProps) {
       // layout backbone automatically instead of forcing another manual
       // step to re-select what was just asked for.
       regionQuery?: { reference: string; sequence: string },
+      // Where the graph came from, as "key: value" lines for the download
+      // headers (an uploaded file by default), and the haplotype gap of an
+      // all-haplotypes query.
+      origin: GraphOrigin = { lines: [`file: ${filename}`] },
     ) => {
       try {
         setLoadingFile(true)
@@ -794,6 +810,7 @@ function App({ worker, onStopLayout }: AppProps) {
         // backend copy to fall back on, so that one is kept.
         setCurrentGraphGfaText(ticket ? null : text)
         setCurrentGraphTicket(ticket ?? null)
+        setGraphOrigin(origin)
         setColorScheme('uniform')
         setDrawLabels(false)
 
@@ -983,7 +1000,9 @@ function App({ worker, onStopLayout }: AppProps) {
 
       const text = await response.text()
       const filename = urlInput.split('/').pop() || 'URL Graph'
-      loadGFAFromText(text, filename)
+      loadGFAFromText(text, filename, 'browser', undefined, false, undefined, {
+        lines: [`url: ${urlInput}`],
+      })
       setUrlDialogOpen(false)
       setUrlInput('')
     } catch (error) {
@@ -1042,6 +1061,15 @@ function App({ worker, onStopLayout }: AppProps) {
         'backend-extraction',
         ticket,
         extractionWithCoords,
+        undefined,
+        {
+          lines: [
+            `graph: ${selectedIndexedGraph}`,
+            `start node: ${startNode}`,
+            `method: BFS, max nodes ${maxNodes}`,
+            `with coordinates: ${extractionWithCoords ? 'yes' : 'no'}`,
+          ],
+        },
       )
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
@@ -1168,6 +1196,19 @@ function App({ worker, onStopLayout }: AppProps) {
         ticket,
         extractionWithCoords,
         { reference, sequence },
+        {
+          lines: [
+            `graph: ${selectedIndexedGraph}`,
+            `region: ${reference ? `${reference} ` : ''}${sequence}:${start}-${end}`,
+            regionAllHaplotypes
+              ? `method: all haplotypes, haplotype gap ${haplotypeGap}`
+              : `method: BFS, max nodes ${maxNodes}`,
+            `with coordinates: ${extractionWithCoords ? 'yes' : 'no'}`,
+          ],
+          haplotypeGapBp: regionAllHaplotypes
+            ? haplotypeGapBases(haplotypeGap)
+            : null,
+        },
       )
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
@@ -1461,6 +1502,23 @@ function App({ worker, onStopLayout }: AppProps) {
     : builtInGeneAssembly
       ? `${BUILT_IN_GENE_SOURCE}, ${builtInGeneAssembly}`
       : null
+
+  // Genes are shown as soon as they are known: once per graph and gene set
+  // (a new graph, the built-in genes arriving, a BED loaded), the Genes color
+  // scheme is picked if any gene lies on the graph's reference. Choosing
+  // another scheme afterwards sticks until the next graph or gene set.
+  const autoGeneColoringRef = useRef<{
+    graph: Graph
+    genes: GeneRecord[]
+  } | null>(null)
+  useEffect(() => {
+    if (!currentGraph || activeGeneTrack.length === 0) return
+    const last = autoGeneColoringRef.current
+    if (last?.graph === currentGraph && last.genes === activeGeneTrack) return
+    autoGeneColoringRef.current = { graph: currentGraph, genes: activeGeneTrack }
+    const result = getGeneNodeMap(currentGraph, activeGeneTrack, geneReferencePath)
+    if ('map' in result) setColorScheme('genes')
+  }, [activeGeneTrack, currentGraph, geneReferencePath])
 
   // Linear Layout without a reference path orders nodes by ID, which the
   // layout engine can only parse when every ID is a 32-bit integer - anything
@@ -1988,6 +2046,7 @@ function App({ worker, onStopLayout }: AppProps) {
               preferredReferencePath={layoutOptions.referencePathName}
               pickedTraversalId={pickedTraversal?.id ?? null}
               onPickTraversal={setPickedTraversal}
+              origin={graphOrigin.lines}
               onDownload={saveGfaTextAsFile}
             />
           </div>
@@ -1998,6 +2057,8 @@ function App({ worker, onStopLayout }: AppProps) {
               referencePath={haplotypeReference}
               preferredReferencePath={layoutOptions.referencePathName}
               onReferencePathChange={setHaplotypeReference}
+              origin={graphOrigin.lines}
+              queryHaplotypeGapBp={graphOrigin.haplotypeGapBp ?? null}
               onDownload={saveGfaTextAsFile}
             />
           </div>
